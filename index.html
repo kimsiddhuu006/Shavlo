@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>shavlo v1.3.5 — Private Messages, Calls &amp; UPI</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.47.10/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
@@ -467,7 +468,7 @@
     .dark .wp-dots { background-color: #0B0B0F; background-image: radial-gradient(rgba(165,153,251,0.16) 1.2px, transparent 1.2px); background-size: 18px 18px; }
     .wp-geo { background-color: #F7F7FA; background-image: url("data:image/svg+xml,%3Csvg width='44' height='44' viewBox='0 0 44 44' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M22 0L44 22L22 44L0 22z' fill='none' stroke='%237E6DF5' stroke-opacity='0.09' stroke-width='1'/%3E%3C/svg%3E"); }
     .dark .wp-geo { background-color: #0B0B0F; background-image: url("data:image/svg+xml,%3Csvg width='44' height='44' viewBox='0 0 44 44' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M22 0L44 22L22 44L0 22z' fill='none' stroke='%23A599FB' stroke-opacity='0.1' stroke-width='1'/%3E%3C/svg%3E"); }
-    [data-msg-bubble] { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+    [data-msg-bubble] { contain: layout style; }
     @keyframes msgPopIn {
       from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.985); }
       to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
@@ -547,10 +548,47 @@
       will-change: transform, filter;
     }
     .status-bar-fill { transform-origin: left center; animation: statusFill 5s linear forwards; will-change: transform; }
+    #composer-dock {
+      transition: padding-bottom 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms ease;
+    }
+    .upi-merge-btn {
+      width: 3rem;
+      margin-left: 0;
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+      filter: blur(0px);
+      will-change: width, margin-left, transform, opacity, filter;
+      transition:
+        width 320ms cubic-bezier(0.22, 1, 0.36, 1),
+        margin-left 320ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
+        filter 240ms ease;
+    }
+    .upi-merge-btn.upi-merged {
+      width: 0 !important;
+      margin-left: -0.375rem !important;
+      opacity: 0 !important;
+      transform: translate3d(-14px, 0, 0) scale(0.55) !important;
+      filter: blur(4px);
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .kb-open #composer-dock {
+      padding-top: 2px !important;
+      padding-bottom: 4px !important;
+      background: linear-gradient(to top, rgba(250, 250, 252, 0.94) 0%, rgba(250, 250, 252, 0.58) 70%, transparent 100%);
+    }
+    .dark .kb-open #composer-dock {
+      background: linear-gradient(to top, rgba(11, 11, 13, 0.92) 0%, rgba(11, 11, 13, 0.55) 65%, transparent 100%);
+    }
+    .kb-open #message-feed {
+      padding-bottom: 84px !important;
+    }
   </style>
 </head>
 <body class="font-sans bg-white dark:bg-[#0B0B0D] text-ink dark:text-[#F4F4F6] selection:bg-brand-100 dark:selection:bg-brand-600/40">
-  <div id="app" class="h-full w-full flex flex-col md:flex-row overflow-hidden"></div>
+  <div id="app" class="fixed top-0 left-0 right-0 h-full w-full flex flex-col md:flex-row overflow-hidden"></div>
   <div id="modal-root"></div>
   <div id="call-root"></div>
   <div id="lock-root"></div>
@@ -755,8 +793,10 @@
               canvas.width = Math.max(1, w);
               canvas.height = Math.max(1, h);
               const ctx = canvas.getContext('2d');
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              onDone(canvas.toDataURL('image/jpeg', (targetMaxEdge && targetMaxEdge >= 720) ? 0.86 : 0.84));
+              onDone(canvas.toDataURL('image/jpeg', (targetMaxEdge && targetMaxEdge >= 1440) ? 0.92 : ((targetMaxEdge && targetMaxEdge >= 720) ? 0.88 : 0.84)));
             } catch (err) {
               onDone(reader.result);
             }
@@ -1066,7 +1106,7 @@
       let supaStatus = 'local'; // 'local' | 'connected' | 'realtime' | 'error'
       let supaLastError = '';
 
-      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public)\nvalues ('shavlo-media', 'shavlo-media', true)\non conflict (id) do update set public = true;\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 1800000);'\n  );\nexception when others then\n  null;\nend $$;\n";
+      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- v1.5.3 Backend Upgrades: Message Expiry, Group Admins, Device Sessions & Anti-Spam\nalter table shavlo_messages add column if not exists expires_at bigint;\ncreate index if not exists idx_shavlo_msgs_exp on shavlo_messages (expires_at) where expires_at is not null;\n\nalter table shavlo_groups add column if not exists admin_ids jsonb default '[]'::jsonb;\n\ncreate table if not exists shavlo_sessions (\n  id text primary key,\n  vault_id text not null,\n  device_name text default '',\n  last_active bigint not null default 0\n);\ncreate index if not exists idx_shavlo_sessions_vault on shavlo_sessions (vault_id, last_active desc);\nalter table shavlo_sessions enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_open_all on shavlo_sessions for all using (true) with check (true);\n\ncreate table if not exists shavlo_user_prefs (\n  vault_id text primary key,\n  prefs jsonb not null default '{}'::jsonb,\n  updated_at bigint not null default 0\n);\nalter table shavlo_user_prefs enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ncreate table if not exists shavlo_vault_items (\n  id text primary key,\n  vault_id text not null,\n  payload jsonb not null,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_vault_vid on shavlo_vault_items (vault_id, created_at desc);\nalter table shavlo_vault_items enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public)\nvalues ('shavlo-media', 'shavlo-media', true)\non conflict (id) do update set public = true;\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_messages where expires_at is not null and expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 604800000);'\n  );\nexception when others then\n  null;\nend $$;\n";
 
       const SUPA_DEFAULT_URL = 'https://vgtxcwltweprtuhgnabl.supabase.co';
       const SUPA_DEFAULT_KEY = 'sb_publishable__twtq_01qxArecbTMAdPXQ_LzSfaI1V';
@@ -1540,15 +1580,7 @@
           dotted.classList.toggle('opacity-0', !showDot);
           dotted.classList.toggle('pointer-events-none', !showDot);
         }
-        const tPill = document.getElementById('typing-pill-bar');
-        if (tPill) {
-          tPill.classList.toggle('hidden', !isTypingNow);
-          tPill.classList.toggle('opacity-100', isTypingNow);
-          tPill.classList.toggle('translate-y-0', isTypingNow);
-          tPill.classList.toggle('opacity-0', !isTypingNow);
-          tPill.classList.toggle('translate-y-1', !isTypingNow);
-          tPill.classList.toggle('pointer-events-none', !isTypingNow);
-        }
+
         return true;
       }
 
@@ -1968,6 +2000,37 @@
           avatar_url: safeImgUrl(state.userProfile.avatarUrl) || '',
           updated_at: Date.now()
         });
+        try {
+          let devId = localStorage.getItem('shavlo_device_id_v1');
+          if (!devId) { devId = 'dev_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('shavlo_device_id_v1', devId); }
+          const devName = /iPhone|iPad/i.test(navigator.userAgent || '') ? 'iPhone / iPad' : (/Android/i.test(navigator.userAgent || '') ? 'Android' : 'Web Browser');
+          supaWriteReliable('shavlo_sessions', 'POST', '', { id: devId, vault_id: activeVaultId, device_name: devName, last_active: Date.now() });
+        } catch (_) {}
+      }
+
+      let _prefsSyncTimer = null;
+      function scheduleUserPrefsSync() {
+        if (!activeVaultId || !state || !getSupaCfg()) return;
+        clearTimeout(_prefsSyncTimer);
+        _prefsSyncTimer = setTimeout(() => {
+          if (!activeVaultId || !state || !getSupaCfg()) return;
+          ensureSecurityDefaults();
+          const prefs = {
+            wallpaper: state.wallpaper || 'clean',
+            customWallpaperUrl: safeImgUrl(state.customWallpaperUrl) || '',
+            upiBarcodeUrl: safeImgUrl(state.userProfile && state.userProfile.upiBarcodeUrl) || '',
+            disappearTimers: state.security.disappearTimers || {},
+            lockedChats: state.security.lockedChats || {},
+            mutedIds: (state.chats || []).filter(c => c.muted).map(c => c.id),
+            pinnedIds: (state.chats || []).filter(c => c.pinned).map(c => c.id)
+          };
+          state.prefsUpdatedAt = Date.now();
+          supaWriteReliable('shavlo_user_prefs', 'POST', '', {
+            vault_id: activeVaultId,
+            prefs,
+            updated_at: state.prefsUpdatedAt
+          });
+        }, 900);
       }
 
       let supaSyncInFlight = false;
@@ -1999,7 +2062,7 @@
             : '?select=*&order=created_at.desc&limit=150';
 
           const vidEnc = encodeURIComponent(activeVaultId);
-          const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts, upiTxns, blocksRows] = await Promise.all([
+          const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts, upiTxns, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
             fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=*') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=*&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=*&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
@@ -2009,7 +2072,10 @@
             supaFetch('shavlo_calls', 'GET', `?select=*&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
             supaFetch('shavlo_read_receipts', 'GET', '?select=*').catch(() => []),
             supaFetch('shavlo_upi_txns', 'GET', `?select=*&or=(sender_id.eq.${vidEnc},receiver_id.eq.${vidEnc})&order=created_at.desc&limit=50`).catch(() => []),
-            supaFetch('shavlo_blocks', 'GET', `?select=*&or=(blocker_id.eq.${vidEnc},blocked_id.eq.${vidEnc})`).catch(() => [])
+            supaFetch('shavlo_blocks', 'GET', `?select=*&or=(blocker_id.eq.${vidEnc},blocked_id.eq.${vidEnc})`).catch(() => []),
+            fetchUsers ? supaFetch('shavlo_sessions', 'GET', `?select=*&vault_id=eq.${vidEnc}&order=last_active.desc&limit=10`).catch(() => null) : Promise.resolve(null),
+            (forceFull || supaSyncTickCount === 1) ? supaFetch('shavlo_vault_items', 'GET', `?select=*&vault_id=eq.${vidEnc}&order=created_at.desc&limit=50`).catch(() => null) : Promise.resolve(null),
+            (forceFull || supaSyncTickCount === 1) ? supaFetch('shavlo_user_prefs', 'GET', `?select=*&vault_id=eq.${vidEnc}`).catch(() => null) : Promise.resolve(null)
           ]);
           const msgs = (!forceFull && lastSupaMsgCreatedAt > 0) ? (msgsRaw || []) : (msgsRaw || []).slice().reverse();
           if (msgs.length > 0) {
@@ -2028,6 +2094,14 @@
               avatarUrl: u.avatar_url || '',
               lastSeen: u.updated_at || Date.now()
             };
+            if (u.vault_id === activeVaultId && Number(u.updated_at || 0) > Number(state.userProfile.avatarUpdatedAt || 0) + 2500) {
+              const nextAv = u.avatar_url || '';
+              if (state.userProfile.avatarUrl !== nextAv) {
+                state.userProfile.avatarUrl = nextAv;
+                state.userProfile.avatarUpdatedAt = Number(u.updated_at || Date.now());
+                persistCurrentVault();
+              }
+            }
           });
           net.requests = (reqs || []).map(r => ({
             id: r.id, fromId: r.from_id, fromName: r.from_name, fromCode: r.from_code,
@@ -2042,10 +2116,13 @@
             createdAt: g.created_at || Date.now()
           }));
           const groupedMsgs = {};
+          const nowMs = Date.now();
           (msgs || []).forEach(row => {
+            if (row.expires_at && Number(row.expires_at) < nowMs) return;
             groupedMsgs[row.room_id] = groupedMsgs[row.room_id] || [];
             groupedMsgs[row.room_id].push(Object.assign({}, row.payload, {
-              id: row.id, authorId: row.author_id, authorName: row.author_name || ''
+              id: row.id, authorId: row.author_id, authorName: row.author_name || '',
+              expiresAt: row.expires_at || (row.payload && row.payload.expiresAt) || null
             }));
           });
           Object.keys(groupedMsgs).forEach(rid => {
@@ -2118,11 +2195,37 @@
               }
             });
           }
+          if (Array.isArray(sessRows)) {
+            ui.activeSessions = sessRows;
+          }
+          if (Array.isArray(vaultRows) && vaultRows.length > 0 && state) {
+            ensureSecurityDefaults();
+            const existingIds = new Set((state.security.shavloVaultItems || []).map(x => x.id));
+            vaultRows.forEach(vr => {
+              if (vr && vr.id && !existingIds.has(vr.id) && vr.payload) {
+                state.security.shavloVaultItems.push(Object.assign({}, vr.payload, { id: vr.id }));
+              }
+            });
+          }
+          if (Array.isArray(prefsRows) && prefsRows[0] && prefsRows[0].prefs && state) {
+            const pr = prefsRows[0].prefs;
+            if (Number(prefsRows[0].updated_at || 0) > Number(state.prefsUpdatedAt || 0) + 2000) {
+              if (pr.wallpaper) state.wallpaper = pr.wallpaper;
+              if (pr.customWallpaperUrl) state.customWallpaperUrl = pr.customWallpaperUrl;
+              if (pr.upiBarcodeUrl && state.userProfile) state.userProfile.upiBarcodeUrl = pr.upiBarcodeUrl;
+              ensureSecurityDefaults();
+              if (pr.disappearTimers) state.security.disappearTimers = Object.assign({}, state.security.disappearTimers, pr.disappearTimers);
+              if (pr.lockedChats) state.security.lockedChats = Object.assign({}, state.security.lockedChats, pr.lockedChats);
+              state.prefsUpdatedAt = Number(prefsRows[0].updated_at || Date.now());
+            }
+          }
           saveNetwork(net, 'cloud_sync');
           if (supaStatus !== 'realtime') supaStatus = 'connected';
           supaLastError = '';
           syncFromNetwork();
         } catch (err) {
+          const prevSupaStatus = supaStatus;
+          const prevSupaErr = supaLastError;
           const msg = (err && err.message) ? String(err.message) : '';
           const isSandboxed = (window.location.origin === 'null' || window.location.protocol === 'about:' || window.location.protocol === 'file:' || window.location.protocol === 'blob:');
           if (isSandboxed && /failed to fetch|networkerror|load failed/i.test(msg)) {
@@ -2138,7 +2241,7 @@
             supaStatus = 'error';
             supaLastError = 'Supabase sync error (' + (msg || 'check URL/key & SQL') + ')';
           }
-          render();
+          if (prevSupaStatus !== supaStatus || prevSupaErr !== supaLastError) safeBackgroundRender();
         } finally {
           supaSyncInFlight = false;
         }
@@ -2205,7 +2308,32 @@
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_requests' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_friendships' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_groups' }, () => scheduleSupaSync(250))
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_users' }, () => scheduleSupaSync(400))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_users' }, (change) => {
+                try {
+                  if (change && change.new && change.new.vault_id) {
+                    const u = change.new;
+                    const net = getNetwork();
+                    net.directory[u.vault_id] = {
+                      vaultId: u.vault_id,
+                      friendCode: u.friend_code,
+                      name: u.name,
+                      upiId: u.upi_id || '',
+                      avatarText: u.avatar_text || getInitial(u.name),
+                      avatarUrl: u.avatar_url || '',
+                      lastSeen: u.updated_at || Date.now()
+                    };
+                    if (u.vault_id === activeVaultId && Number(u.updated_at || 0) > Number(state.userProfile.avatarUpdatedAt || 0) + 1500) {
+                      state.userProfile.avatarUrl = u.avatar_url || '';
+                      state.userProfile.avatarUpdatedAt = Number(u.updated_at || Date.now());
+                      persistCurrentVault();
+                    }
+                    saveNetwork(net, 'realtime_user');
+                    syncFromNetwork();
+                    return;
+                  }
+                } catch (_) {}
+                scheduleSupaSync(300);
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_txns' }, () => scheduleSupaSync(300))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_calls' }, (change) => {
                 try {
@@ -2254,6 +2382,16 @@
               .on('broadcast', { event: 'ring_ping' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId) triggerRingPing(payload.roomId, payload.fromName, true);
               })
+              .on('broadcast', { event: 'priv_room_msg' }, ({ payload }) => {
+                if (payload && privateRoomSession && payload.code === privateRoomSession.code && payload.msg) {
+                  if (!privateRoomSession.messages.some(m => m.id === payload.msg.id)) {
+                    privateRoomSession.messages.push(payload.msg);
+                    savePrivateRoomMessages(privateRoomSession.code, privateRoomSession.messages);
+                    render();
+                    scrollPrivateRoomToBottom();
+                  }
+                }
+              })
               .on('broadcast', { event: 'typing' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId && payload.roomId) markRemoteTyping(payload.roomId);
               })
@@ -2296,21 +2434,26 @@
                     delete ui.offlineGraceUntil[vid];
                     clearTimeout(offlineGraceTimers[vid]);
                   });
+                  const prevPresKey = Object.keys(ui.onlineVaultIds || {}).sort().join(',') + '|' + JSON.stringify(ui.peerActiveRooms || {});
+                  const nextPresKey = Object.keys(nextOnline).sort().join(',') + '|' + JSON.stringify(nextRooms);
                   ui.onlineVaultIds = nextOnline;
                   ui.peerActiveRooms = nextRooms;
-                  updatePlusRingDOM();
-                  safeBackgroundRender();
+                  if (!updatePlusRingDOM() && prevPresKey !== nextPresKey) {
+                    safeBackgroundRender();
+                  }
                 } catch (e) {}
               })
               .subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
+                  const wasRt = (supaStatus === 'realtime');
                   supaStatus = 'realtime';
                   lastPresKey = '';
                   syncOwnPresence();
-                  safeBackgroundRender();
-                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                  if (!wasRt && state && state.activeNav === 'you') safeBackgroundRender();
+                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                   if (supaStatus === 'realtime') supaStatus = 'connected';
-                  setTimeout(() => { if (activeVaultId && state && getSupaCfg()) startSupaPolling(); }, 3500);
+                  clearTimeout(window._supaReconnectTimer);
+                  window._supaReconnectTimer = setTimeout(() => { if (activeVaultId && state && getSupaCfg()) startSupaPolling(); }, 8000);
                 }
               });
           }
@@ -2498,6 +2641,50 @@
         const vaults = getAllVaults();
         vaults[activeVaultId] = state;
         saveAllVaults(vaults);
+        if (typeof scheduleUserPrefsSync === "function") scheduleUserPrefsSync();
+      }
+
+      function getMsgSig(msg) {
+        if (!msg) return '';
+        const rx = Array.isArray(msg.reactions) ? msg.reactions.join(',') : '';
+        return [
+          msg.status || '',
+          msg.edited ? '1' : '0',
+          msg.text || '',
+          rx,
+          msg.mistState || '',
+          msg.viewedOnce ? '1' : '0',
+          msg.paid ? '1' : '0',
+          msg.imageUrl || msg.photoUrl || msg.audioUrl || ''
+        ].join('|');
+      }
+
+      function patchMessageFeedInPlace(feed, chat, filteredMsgs) {
+        if (!feed || !chat) return;
+        const wantedIds = new Set(filteredMsgs.map(m => m.id));
+        const existingMap = new Map();
+        feed.querySelectorAll('[data-msg-bubble]').forEach(el => {
+          const id = el.getAttribute('data-msg-bubble');
+          if (!wantedIds.has(id)) {
+            el.remove();
+          } else {
+            existingMap.set(id, el);
+          }
+        });
+        filteredMsgs.forEach(msg => {
+          const sig = getMsgSig(msg);
+          const curEl = existingMap.get(msg.id);
+          if (curEl) {
+            if (curEl.getAttribute('data-msg-sig') !== sig) {
+              const tmp = document.createElement('div');
+              tmp.innerHTML = renderBubble(chat, msg);
+              const nextEl = tmp.firstElementChild;
+              if (nextEl) curEl.replaceWith(nextEl);
+            }
+          } else {
+            feed.insertAdjacentHTML('beforeend', renderBubble(chat, msg));
+          }
+        });
       }
 
       function syncFromNetwork() {
@@ -2551,9 +2738,15 @@
           showToast('Call ended');
         }
 
-        const msgDigest = Object.keys(net.peerChats || {}).map(k => k + ':' + ((net.peerChats[k] || []).length) + ':' + (((net.peerChats[k] || []).slice(-1)[0] || {}).id || '')).join('|');
+        const msgDigest = Object.keys(net.peerChats || {}).map(k => {
+          const arr = net.peerChats[k] || [];
+          const last = arr[arr.length - 1] || {};
+          return k + ':' + arr.length + ':' + (last.id || '') + ':' + (last.status || '');
+        }).join('|');
+        const rrDigest = JSON.stringify(net.readReceipts || {});
         const digest = [
           msgDigest,
+          rrDigest,
           (net.requests || []).length,
           (net.friendships || []).length,
           (net.groups || []).length,
@@ -2574,12 +2767,12 @@
               ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase()))
               : activeMessages;
             const wasNear = isNearChatBottom();
-            feed.innerHTML = '<div class="flex justify-center pb-2.5"><span class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] font-semibold text-muted tracking-tight">Today</span></div>'
-              + filteredMsgs.map(m => renderBubble(chat, m)).join('');
+            patchMessageFeedInPlace(feed, chat, filteredMsgs);
             if (wasNear) scrollToBottom();
             return;
           }
         }
+        if (ae && ae.id === 'message-input') return;
         const wasNearBeforeRender = isNearChatBottom();
         const savedId = isTyping ? ae.id : '';
         const savedVal = isTyping ? ae.value : '';
@@ -2619,10 +2812,10 @@
             clearTimeout(peerTypingTimers[ev.data.roomId]);
             peerTypingTimers[ev.data.roomId] = setTimeout(() => {
               delete ui.peerTypingRooms[ev.data.roomId];
-              render();
+              if (!updatePlusRingDOM()) safeBackgroundRender();
             }, 2200);
             if (ev.data.askReply) syncOwnPresence(false, false);
-            render();
+            if (!updatePlusRingDOM()) safeBackgroundRender();
             return;
           }
           if (ev.data.type === 'peer_presence' && ev.data.fromId && ev.data.fromId !== activeVaultId) {
@@ -2637,7 +2830,7 @@
               delete ui.onlineVaultIds[ev.data.fromId];
               delete ui.peerActiveRooms[ev.data.fromId];
             }
-            safeBackgroundRender();
+            if (!updatePlusRingDOM()) safeBackgroundRender();
             return;
           }
           invalidateNetworkCache();
@@ -2669,6 +2862,9 @@
 
       function safeImgUrl(url) {
         const u = String(url || '').trim();
+        if (!u) return '';
+        if (/^https?:\/\/[^\s"'<>]+$/i.test(u)) return u;
+        if (/^blob:[^\s"'<>]+$/i.test(u)) return u;
         if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(u)) return u;
         if (/^data:image\/svg\+xml;(?:charset=utf-8,[A-Za-z0-9%_\-.!~*'()]+|base64,[A-Za-z0-9+/=]+)$/i.test(u)) return u;
         return '';
@@ -3724,6 +3920,23 @@
       }
 
       // Messaging Helpers
+      function refreshChatFeedInPlace(chatId) {
+        const feed = document.getElementById('message-feed');
+        const cur = getSelectedChat();
+        if (feed && cur && cur.id === chatId && !(ui.privateChatMode && ui.privateChatMode[cur.id])) {
+          const activeMessages = cur.messages || [];
+          const filteredMsgs = ui.inChatSearchQuery
+            ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase()))
+            : activeMessages;
+          const wasNear = isNearChatBottom();
+          patchMessageFeedInPlace(feed, cur, filteredMsgs);
+          updatePlusRingDOM();
+          if (wasNear) scrollToBottom(false);
+          return true;
+        }
+        return false;
+      }
+
       function triggerAutoReply(chatId, userText) {
         const chat = state.chats.find(c => c.id === chatId);
         if (!chat) return;
@@ -3761,8 +3974,10 @@
           });
           activeChat.lastTime = nowTime();
           persistCurrentVault();
-          render();
-          scrollToBottom();
+          if (!refreshChatFeedInPlace(chatId)) {
+            safeBackgroundRender();
+            scrollToBottom();
+          }
         }, 2200);
       }
 
@@ -3775,7 +3990,8 @@
           saveNetwork(net, 'peer_message');
           supaWriteReliable('shavlo_messages', 'POST', '', {
             id: fullMsg.id, room_id: chat.id, author_id: activeVaultId,
-            author_name: state.userProfile.name, payload: fullMsg, created_at: Date.now()
+            author_name: state.userProfile.name, payload: fullMsg, created_at: Date.now(),
+            expires_at: fullMsg.expiresAt || null
           });
         } else {
           const targetChat = state.chats.find(x => x.id === chat.id) || chat;
@@ -3786,43 +4002,175 @@
         }
       }
 
-      function generateUpiQrDataUrl(upiUri) {
-        const str = String(upiUri || 'upi://pay');
-        const N = 25;
-        const grid = Array.from({ length: N }, () => Array(N).fill(0));
-        const setFinder = (r0, c0) => {
-          for (let r = 0; r < 7; r++) {
-            for (let c = 0; c < 7; c++) {
-              const on = (r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4));
-              grid[r0 + r][c0 + c] = on ? 1 : 0;
-            }
+      const _QR_VER_M = [
+        null,
+        [16, 10, 1, 0], [28, 16, 1, 0], [44, 26, 1, 0], [64, 18, 2, 0], [86, 24, 2, 0],
+        [108, 16, 4, 0], [124, 18, 4, 0], [154, 22, 2, 2], [182, 22, 3, 2], [216, 26, 4, 1],
+      ];
+      const _QR_ALIGN = [
+        null, [], [6,18], [6,22], [6,26], [6,30], [6,34],
+        [6,22,38], [6,24,42], [6,26,46], [6,28,50]
+      ];
+      const _GF_EXP = new Uint8Array(512);
+      const _GF_LOG = new Uint8Array(256);
+      (() => {
+        let x = 1;
+        for (let i = 0; i < 255; i++) {
+          _GF_EXP[i] = x; _GF_LOG[x] = i;
+          x <<= 1; if (x & 0x100) x ^= 0x11d;
+        }
+        for (let i = 255; i < 512; i++) _GF_EXP[i] = _GF_EXP[i - 255];
+      })();
+      function _qrGfMul(a, b) { return (a === 0 || b === 0) ? 0 : _GF_EXP[_GF_LOG[a] + _GF_LOG[b]]; }
+      function _qrRsGenPoly(deg) {
+        let p = [1];
+        for (let i = 0; i < deg; i++) {
+          const next = new Array(p.length + 1).fill(0), root = _GF_EXP[i];
+          for (let j = 0; j < p.length; j++) { next[j] ^= p[j]; next[j + 1] ^= _qrGfMul(p[j], root); }
+          p = next;
+        }
+        return p;
+      }
+      function _qrRsRemainder(data, ecLen) {
+        const gen = _qrRsGenPoly(ecLen), res = new Uint8Array(data.length + ecLen);
+        res.set(data);
+        for (let i = 0; i < data.length; i++) {
+          const coef = res[i];
+          if (coef !== 0) for (let j = 0; j < gen.length; j++) res[i + j] ^= _qrGfMul(gen[j], coef);
+        }
+        return res.slice(data.length);
+      }
+      function encodeQrMatrix(text) {
+        const bytes = new TextEncoder().encode(String(text || ''));
+        let ver = 1;
+        for (; ver <= 10; ver++) {
+          const capBits = _QR_VER_M[ver][0] * 8, lenBits = ver <= 9 ? 8 : 16;
+          if (4 + lenBits + bytes.length * 8 <= capBits) break;
+        }
+        if (ver > 10) ver = 10;
+        const [totalDataBytes, ecPerBlock, b1Count, b2Count] = _QR_VER_M[ver];
+        const bits = [];
+        const pushBits = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); };
+        pushBits(0b0100, 4);
+        pushBits(bytes.length, ver <= 9 ? 8 : 16);
+        for (const b of bytes) pushBits(b, 8);
+        const maxBits = totalDataBytes * 8;
+        for (let i = 0; i < 4 && bits.length < maxBits; i++) bits.push(0);
+        while (bits.length % 8 !== 0) bits.push(0);
+        let padToggle = 0;
+        while (bits.length < maxBits) { pushBits(padToggle ? 0x11 : 0xec, 8); padToggle ^= 1; }
+        const codewords = new Uint8Array(totalDataBytes);
+        for (let i = 0; i < totalDataBytes; i++) {
+          let v = 0; for (let b = 0; b < 8; b++) v = (v << 1) | bits[i * 8 + b];
+          codewords[i] = v;
+        }
+        const totalBlocks = b1Count + b2Count;
+        const b1Len = Math.floor(totalDataBytes / totalBlocks), b2Len = b1Len + (b2Count > 0 ? 1 : 0);
+        const dataBlocks = [], ecBlocks = [];
+        let offset = 0;
+        for (let i = 0; i < totalBlocks; i++) {
+          const len = i < b1Count ? b1Len : b2Len;
+          const blk = codewords.slice(offset, offset + len);
+          offset += len;
+          dataBlocks.push(blk); ecBlocks.push(_qrRsRemainder(blk, ecPerBlock));
+        }
+        const finalBytes = [], maxDataLen = Math.max(b1Len, b2Len);
+        for (let i = 0; i < maxDataLen; i++) for (const blk of dataBlocks) if (i < blk.length) finalBytes.push(blk[i]);
+        for (let i = 0; i < ecPerBlock; i++) for (const ec of ecBlocks) finalBytes.push(ec[i]);
+        const N = ver * 4 + 17;
+        const mod = Array.from({ length: N }, () => new Int8Array(N).fill(0));
+        const isFunc = Array.from({ length: N }, () => new Uint8Array(N));
+        const setFunc = (r, c, v) => { if (r >= 0 && r < N && c >= 0 && c < N) { mod[r][c] = v ? 1 : 0; isFunc[r][c] = 1; } };
+        const drawFinder = (r0, c0) => {
+          for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+            const rr = r0 + r, cc = c0 + c;
+            if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+            const on = (r >= 0 && r <= 6 && c >= 0 && c <= 6) && (r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4));
+            setFunc(rr, cc, on ? 1 : 0);
           }
         };
-        setFinder(0, 0);
-        setFinder(0, N - 7);
-        setFinder(N - 7, 0);
-        for (let i = 8; i < N - 8; i++) {
-          grid[6][i] = (i % 2 === 0) ? 1 : 0;
-          grid[i][6] = (i % 2 === 0) ? 1 : 0;
-        }
-        let h = 2166136261;
-        for (let i = 0; i < str.length; i++) {
-          h ^= str.charCodeAt(i);
-          h = Math.imul(h, 16777619);
-        }
-        for (let r = 0; r < N; r++) {
-          for (let c = 0; c < N; c++) {
-            const inTL = r < 8 && c < 8;
-            const inTR = r < 8 && c >= N - 8;
-            const inBL = r >= N - 8 && c < 8;
-            if (inTL || inTR || inBL || r === 6 || c === 6) continue;
-            h ^= (r * 31 + c * 17);
-            h = Math.imul(h, 16777619);
-            grid[r][c] = ((h >>> 16) & 1);
+        drawFinder(0, 0); drawFinder(0, N - 7); drawFinder(N - 7, 0);
+        const ap = _QR_ALIGN[ver];
+        for (const r0 of ap) for (const c0 of ap) {
+          if ((r0 < 9 && c0 < 9) || (r0 < 9 && c0 >= N - 9) || (r0 >= N - 9 && c0 < 9)) continue;
+          for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++) {
+            setFunc(r0 + r, c0 + c, (Math.abs(r) === 2 || Math.abs(c) === 2 || (r === 0 && c === 0)) ? 1 : 0);
           }
         }
+        for (let i = 8; i < N - 8; i++) { setFunc(6, i, i % 2 === 0 ? 1 : 0); setFunc(i, 6, i % 2 === 0 ? 1 : 0); }
+        setFunc(N - 8, 8, 1);
+        for (let i = 0; i < 9; i++) if (i !== 6) { isFunc[8][i] = 1; isFunc[i][8] = 1; }
+        for (let i = N - 8; i < N; i++) isFunc[8][i] = 1;
+        for (let i = N - 7; i < N; i++) isFunc[i][8] = 1;
+        if (ver >= 7) {
+          let rem = ver;
+          for (let i = 0; i < 12; i++) rem = (rem << 1) ^ (((rem >> 11) & 1) * 0x1f25);
+          const vBits = (ver << 12) | rem;
+          for (let i = 0; i < 18; i++) {
+            const bit = (vBits >> i) & 1, r = Math.floor(i / 3), c = N - 11 + (i % 3);
+            setFunc(r, c, bit); setFunc(c, r, bit);
+          }
+        }
+        const dataBits = [];
+        for (const b of finalBytes) for (let i = 7; i >= 0; i--) dataBits.push((b >> i) & 1);
+        let bitIdx = 0, dir = -1;
+        for (let right = N - 1; right >= 1; right -= 2) {
+          if (right === 6) right = 5;
+          for (let vert = 0; vert < N; vert++) {
+            const r = dir === -1 ? (N - 1 - vert) : vert;
+            for (let j = 0; j < 2; j++) {
+              const c = right - j;
+              if (!isFunc[r][c]) mod[r][c] = bitIdx < dataBits.length ? dataBits[bitIdx++] : 0;
+            }
+          }
+          dir *= -1;
+        }
+        const maskFn = [
+          (r, c) => (r + c) % 2 === 0, (r, c) => r % 2 === 0, (r, c) => c % 3 === 0, (r, c) => (r + c) % 3 === 0,
+          (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0, (r, c) => ((r * c) % 2 + (r * c) % 3) === 0,
+          (r, c) => (((r * c) % 2 + (r * c) % 3) % 2) === 0, (r, c) => (((r + c) % 2 + (r * c) % 3) % 2) === 0,
+        ];
+        const writeFormat = (grid, maskId) => {
+          const data = (0b00 << 3) | maskId;
+          let rem = data;
+          for (let i = 0; i < 10; i++) rem = (rem << 1) ^ (((rem >> 9) & 1) * 0x537);
+          const fmt = ((data << 10) | rem) ^ 0x5412;
+          for (let i = 0; i <= 5; i++) grid[8][i] = (fmt >> (14 - i)) & 1;
+          grid[8][7] = (fmt >> 8) & 1;
+          grid[8][8] = (fmt >> 7) & 1;
+          grid[7][8] = (fmt >> 6) & 1;
+          for (let i = 9; i < 15; i++) grid[14 - i][8] = (fmt >> (14 - i)) & 1;
+          for (let i = 0; i < 7; i++) grid[N - 1 - i][8] = (fmt >> (14 - i)) & 1;
+          for (let i = 7; i < 15; i++) grid[8][N - 15 + i] = (fmt >> (14 - i)) & 1;
+        };
+        let bestGrid = null, bestPenalty = Infinity;
+        for (let m = 0; m < 8; m++) {
+          const g = mod.map((row, r) => Array.from(row, (v, c) => isFunc[r][c] ? v : (v ^ (maskFn[m](r, c) ? 1 : 0))));
+          writeFormat(g, m);
+          let pen = 0;
+          for (let r = 0; r < N; r++) {
+            let run = 1;
+            for (let c = 1; c < N; c++) { if (g[r][c] === g[r][c - 1]) { run++; if (run === 5) pen += 3; else if (run > 5) pen += 1; } else run = 1; }
+          }
+          for (let c = 0; c < N; c++) {
+            let run = 1;
+            for (let r = 1; r < N; r++) { if (g[r][c] === g[r - 1][c]) { run++; if (run === 5) pen += 3; else if (run > 5) pen += 1; } else run = 1; }
+          }
+          for (let r = 0; r < N - 1; r++) for (let c = 0; c < N - 1; c++) {
+            const s = g[r][c] + g[r + 1][c] + g[r][c + 1] + g[r + 1][c + 1];
+            if (s === 0 || s === 4) pen += 3;
+          }
+          if (pen < bestPenalty) { bestPenalty = pen; bestGrid = g; }
+        }
+        return bestGrid;
+      }
+
+      function generateUpiQrDataUrl(upiUri) {
+        const str = String(upiUri || 'upi://pay');
+        const grid = encodeQrMatrix(str);
+        const N = grid.length;
+        const pad = 3;
         try {
-          const pad = 2;
           const cell = 8;
           const size = (N + pad * 2) * cell;
           const canvas = document.createElement('canvas');
@@ -3842,10 +4190,10 @@
           let rects = '';
           for (let r = 0; r < N; r++) {
             for (let c = 0; c < N; c++) {
-              if (grid[r][c]) rects += `<rect x="${c + 2}" y="${r + 2}" width="1" height="1"/>`;
+              if (grid[r][c]) rects += `<rect x="${c + pad}" y="${r + pad}" width="1" height="1"/>`;
             }
           }
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N + 4} ${N + 4}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#FFFFFF"/><g fill="#09090C">${rects}</g></svg>`;
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N + pad * 2} ${N + pad * 2}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#ffffff"/><g fill="#09090C">${rects}</g></svg>`;
           return 'data:image/svg+xml;base64,' + btoa(svg);
         }
       }
@@ -3983,21 +4331,21 @@
           scrollToBottom();
           return;
         }
-        const canFastAppend = !ui.replyingTo && !ui.attachMenuOpen && !!document.getElementById('message-feed');
+        const canFastAppend = !!document.getElementById('message-feed') && !!document.getElementById('message-input');
         pushMessageToChat(chat, msg);
         playSubtleTone('send');
         ui.replyingTo = null;
         ui.attachMenuOpen = false;
         if (canFastAppend) {
+          const rb = document.getElementById('reply-preview-bar');
+          if (rb) rb.remove();
           const feed = document.getElementById('message-feed');
           if (feed) { feed.insertAdjacentHTML('beforeend', renderBubble(chat, msg)); if (feed.lastElementChild) feed.lastElementChild.classList.add('msg-pop-in'); }
           if (ui.draftsByChat && chat) delete ui.draftsByChat[chat.id];
           const inp = document.getElementById('message-input');
           if (inp) { inp.value = ''; inp.focus({ preventScroll: true }); }
-          const sendBtn = document.getElementById('chat-send-btn');
-          const micBtn = document.getElementById('chat-mic-btn');
-          if (sendBtn) sendBtn.classList.add('hidden');
-          if (micBtn) micBtn.classList.remove('hidden');
+          const isFocused = document.activeElement && document.activeElement.id === 'message-input';
+          if (typeof syncComposerActionButtons === 'function') syncComposerActionButtons(false, isFocused);
           scrollToBottom(false);
         } else {
           render();
@@ -4010,19 +4358,211 @@
             if (!state) return;
             const c = state.chats.find(x => x.id === chat.id);
             const m = c && c.messages.find(x => x.id === msgId);
-            if (m && m.status === 'sent') { m.status = 'delivered'; persistCurrentVault(); render(); }
+            if (m && m.status === 'sent') { m.status = 'delivered'; persistCurrentVault(); if (!refreshChatFeedInPlace(chat.id)) safeBackgroundRender(); }
           }, 420);
           setTimeout(() => {
             if (!state) return;
             const c = state.chats.find(x => x.id === chat.id);
             const m = c && c.messages.find(x => x.id === msgId);
-            if (m && m.status !== 'read') { m.status = 'read'; persistCurrentVault(); render(); }
+            if (m && m.status !== 'read') { m.status = 'read'; persistCurrentVault(); if (!refreshChatFeedInPlace(chat.id)) safeBackgroundRender(); }
             triggerAutoReply(chat.id, clean);
           }, 950);
         }
       }
 
       let paymentLockGuard = false;
+      function isValidUpiHandle(v) {
+        return /^[a-zA-Z0-9._-]{2,}@[a-zA-Z0-9]{2,}$/.test(String(v || '').trim());
+      }
+
+      async function fetchLatestPeerUpi(chat) {
+        if (!chat) return '';
+        let upi = String(chat.upiId || '').trim();
+        if (chat.isPeer && chat.peerVaultId && getSupaCfg()) {
+          try {
+            const rows = await supaFetch('shavlo_users', 'GET', `?vault_id=eq.${encodeURIComponent(chat.peerVaultId)}&select=upi_id,name`);
+            if (Array.isArray(rows) && rows[0]) {
+              upi = String(rows[0].upi_id || '').trim();
+              chat.upiId = upi;
+              const net = getNetwork();
+              if (net.directory && net.directory[chat.peerVaultId]) {
+                net.directory[chat.peerVaultId].upiId = upi;
+                saveNetwork(net, 'upi_lookup');
+              }
+            }
+          } catch (e) {}
+        }
+        return upi;
+      }
+
+      function buildUpiPayUri(pa, pn, am, tn, tr) {
+        return `upi://pay?pa=${encodeURIComponent(pa)}&pn=${encodeURIComponent(pn || 'Shavlo User')}&am=${encodeURIComponent(Number(am).toFixed(2))}&cu=INR&tn=${encodeURIComponent(tn || 'Shavlo Payment')}&tr=${encodeURIComponent(tr || '')}`;
+      }
+
+      async function launchRealUpiPayment(amount, note, targetChatId, pin, mode) {
+        ensureSecurityDefaults();
+        if (paymentLockGuard) return false;
+        const nowMs = Date.now();
+        if (state.security.upiPinLockedUntil && nowMs < state.security.upiPinLockedUntil) {
+          const secsLeft = Math.ceil((state.security.upiPinLockedUntil - nowMs) / 1000);
+          ui.pinError = `Too many failed attempts. Try again in ${secsLeft}s.`;
+          renderModal();
+          return false;
+        }
+        const cleanPin = String(pin || '').replace(/\D/g, '');
+        if (cleanPin.length !== 4) {
+          ui.pinError = 'Enter your 4-digit UPI PIN.';
+          renderModal();
+          return false;
+        }
+        const num = Math.round(Number(amount) * 100) / 100;
+        if (!Number.isFinite(num) || num <= 0) {
+          ui.pinError = 'Enter a valid amount greater than ₹0.';
+          renderModal();
+          return false;
+        }
+        if (num > 100000) {
+          ui.pinError = 'Single UPI transfer cannot exceed ₹1,00,000.';
+          renderModal();
+          return false;
+        }
+        if (hashPin(cleanPin) !== state.security.masterPinHash) {
+          state.security.upiPinAttempts = (state.security.upiPinAttempts || 0) + 1;
+          if (state.security.upiPinAttempts >= 3) {
+            state.security.upiPinLockedUntil = nowMs + 30000;
+            state.security.upiPinAttempts = 0;
+            persistCurrentVault();
+            ui.pinError = '3 failed PIN attempts — payments locked for 30s.';
+          } else {
+            const left = 3 - state.security.upiPinAttempts;
+            persistCurrentVault();
+            ui.pinError = `Incorrect passcode (${left} attempt${left === 1 ? '' : 's'} left)`;
+          }
+          renderModal();
+          return false;
+        }
+        state.security.upiPinAttempts = 0;
+        state.security.upiPinLockedUntil = 0;
+        const limit = Number(state.security.dailyLimit) || 25000;
+        const spentToday = getTodaySpend();
+        if (spentToday + num > limit) {
+          ui.pinError = `Exceeds daily limit (${formatRupees(Math.max(0, limit - spentToday))} remaining today).`;
+          renderModal();
+          return false;
+        }
+        const chat = getMergedChats().find(c => c.id === (targetChatId || state.selectedChatId));
+        if (!chat) return false;
+        const receiverUpi = await fetchLatestPeerUpi(chat);
+        if (!isValidUpiHandle(receiverUpi) || receiverUpi === 'friend@upi' || receiverUpi === 'contact@upi') {
+          ui.pinError = `${chat.name} hasn't added a valid UPI ID yet.`;
+          renderModal();
+          return false;
+        }
+        const txnId = 'UPI' + String(Date.now()).slice(-10);
+        const noteText = (note || 'UPI Payment').trim();
+        const upiUri = buildUpiPayUri(receiverUpi, chat.name, num, noteText, txnId);
+        if (chat.isPeer && activeVaultId) {
+          supaWriteReliable('shavlo_upi_txns', 'POST', '', {
+            id: txnId,
+            room_id: chat.id,
+            sender_id: activeVaultId,
+            receiver_id: chat.peerVaultId || '',
+            amount: num,
+            note: noteText,
+            status: 'pending',
+            created_at: Date.now()
+          });
+        }
+        ui.pendingUpiPay = {
+          txnId,
+          chatId: chat.id,
+          peerVaultId: chat.peerVaultId || '',
+          receiverName: chat.name,
+          receiverUpi,
+          amount: num,
+          note: noteText,
+          upiUri,
+          mode: mode || 'instant',
+          pre: ui.upiPrefill ? { ...ui.upiPrefill } : {}
+        };
+        ui.pinError = '';
+        ui.modal = 'upiLaunch';
+        renderModal();
+        if (/Android/i.test(navigator.userAgent || '')) {
+          try { window.location.href = upiUri; } catch (e) {}
+        }
+        return true;
+      }
+
+      function finalizePendingUpiPay(utrRef) {
+        const p = ui.pendingUpiPay;
+        if (!p) return;
+        const chat = getMergedChats().find(c => c.id === p.chatId);
+        if (!chat) { ui.pendingUpiPay = null; ui.modal = null; renderModal(); return; }
+        const cleanUtr = String(utrRef || '').trim();
+        const finalNote = cleanUtr ? `${p.note} • UTR ${cleanUtr}` : p.note;
+        const receiptSig = 'SIG-' + syncHash(`${p.txnId}:${p.amount}:${p.receiverUpi}:${activeVaultId}`).slice(0, 10);
+        const msg = {
+          id: 'm_' + Date.now(),
+          sender: 'me',
+          senderName: 'You',
+          type: 'upi',
+          amount: p.amount,
+          upiId: p.receiverUpi,
+          note: finalNote,
+          txnId: p.txnId,
+          receiptSig,
+          escrow: false,
+          escrowStatus: 'settled',
+          direction: 'sent',
+          time: nowTime(),
+          status: 'read',
+          reactions: [],
+          starred: false
+        };
+        pushMessageToChat(chat, msg);
+        if (chat.isPeer && activeVaultId) {
+          supaWriteReliable('shavlo_upi_txns', 'PATCH', `?id=eq.${encodeURIComponent(p.txnId)}`, {
+            status: 'settled',
+            note: finalNote
+          });
+        }
+        state.upiHistory.unshift({
+          id: 'tx_' + Date.now(),
+          name: chat.name,
+          upiId: p.receiverUpi,
+          amount: p.amount,
+          direction: 'sent',
+          note: finalNote,
+          status: 'Settled',
+          receiptSig,
+          date: 'Today, ' + msg.time,
+          txnId: p.txnId
+        });
+        if (p.pre && (p.pre.requestMsgId || p.pre.splitMsgId)) {
+          if (chat.isPeer) {
+            const net = getNetwork();
+            const list = net.peerChats[chat.id] || [];
+            if (p.pre.requestMsgId) { const rm = list.find(m => m.id === p.pre.requestMsgId); if (rm) rm.paid = true; }
+            if (p.pre.splitMsgId) { const sm = list.find(m => m.id === p.pre.splitMsgId); if (sm && sm.participants && sm.participants[p.pre.splitIdx]) sm.participants[p.pre.splitIdx].paid = true; }
+            saveNetwork(net, 'peer_update');
+          } else {
+            if (p.pre.requestMsgId) { const rm = chat.messages.find(m => m.id === p.pre.requestMsgId); if (rm) rm.paid = true; }
+            if (p.pre.splitMsgId) { const sm = chat.messages.find(m => m.id === p.pre.splitMsgId); if (sm && sm.participants && sm.participants[p.pre.splitIdx]) sm.participants[p.pre.splitIdx].paid = true; }
+          }
+        }
+        persistCurrentVault();
+        ui.pendingUpiPay = null;
+        ui.modal = null;
+        ui.pinError = '';
+        ui.upiPrefill = null;
+        ui.requestQrAmt = 0;
+        render();
+        scrollToBottom();
+        playSubtleTone('pay');
+        showToast(`Confirmed ${formatRupees(p.amount)} to ${p.receiverUpi}`);
+      }
+
       function sendUpiPayment(amount, note, targetChatId, pin, mode) {
         ensureSecurityDefaults();
         if (paymentLockGuard) return false;
@@ -4380,6 +4920,9 @@
         savePrivateRoomMessages(privateRoomSession.code, privateRoomSession.messages);
         if (liveChannel) {
           try { liveChannel.postMessage({ type: 'priv_room_msg', code: privateRoomSession.code, msg }); } catch (e) {}
+        }
+        if (supaRealtimeChan) {
+          try { supaRealtimeChan.send({ type: 'broadcast', event: 'priv_room_msg', payload: { code: privateRoomSession.code, msg } }); } catch (e) {}
         }
         supaWriteReliable('shavlo_messages', 'POST', '', {
           id: msg.id, room_id: privateRoomSession.roomId, author_id: privateRoomSession.guestId,
@@ -5195,9 +5738,9 @@
         const activeMessages = isPrivateMode ? (ui.privateMessages[chat.id] || []) : chat.messages;
 
         return `
-          <main id="active-chat-main" class="${mobileCls} fixed inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-white dark:bg-[#0B0B0D]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
+          <main id="active-chat-main" class="${mobileCls} absolute inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-white dark:bg-[#0B0B0D]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
             <!-- Minimalist Clean White & Black Upper Shelf -->
-            <header style="padding-top:max(1.25rem, env(safe-area-inset-top)); transform:translateZ(0);" class="absolute top-0 inset-x-0 z-20 px-4 sm:px-6 pb-5 flex items-center justify-between gap-3 ${isPrivateMode ? 'bg-black/95' : 'bg-white/90 dark:bg-[#09090C]/90'} backdrop-blur-md">
+            <header style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 border-b border-black/[0.04] dark:border-white/[0.06] ${isPrivateMode ? 'bg-black/95' : 'bg-white/90 dark:bg-[#09090C]/90'} backdrop-blur-md">
               <div class="flex items-center gap-3 min-w-0">
                 <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition ${isPrivateMode ? 'bg-white/15 text-white hover:bg-white/20' : 'bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black'}">
                   ${icon('back', 'w-5 h-5')}
@@ -5231,7 +5774,7 @@
             ` : ''}
 
             <!-- Messages Feed -->
-            <div id="message-feed" data-scroll-host="message-feed" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-4 sm:px-6 pt-28 pb-32 space-y-2 ${ui.shoulderVeil ? 'shoulder-veil-on' : ''} ${isPrivateMode ? 'private-chat-box' : (state.wallpaper === 'custom' ? 'bg-cover bg-center' : 'wp-' + (state.wallpaper || 'clean'))}" ${!isPrivateMode && state.wallpaper === 'custom' && state.customWallpaperUrl ? `style="background-image:url('${safeImgUrl(state.customWallpaperUrl)}')"` : ''}>
+            <div id="message-feed" data-scroll-host="message-feed" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-4 sm:px-6 pt-4 pb-28 space-y-2 ${ui.shoulderVeil ? 'shoulder-veil-on' : ''} ${isPrivateMode ? 'private-chat-box' : (state.wallpaper === 'custom' ? 'bg-cover bg-center' : 'wp-' + (state.wallpaper || 'clean'))}" ${!isPrivateMode && state.wallpaper === 'custom' && state.customWallpaperUrl ? `style="background-image:url('${safeImgUrl(state.customWallpaperUrl)}')"` : ''}>
               <div class="flex justify-center pb-2.5">
                 ${isPrivateMode ? `
                   <div class="flex flex-col items-center gap-2 py-2">
@@ -5270,17 +5813,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
 
             <!-- Seamless Floating Composer Shelf (lifted slightly, borderless, merged into chat) -->
-            <div style="padding-bottom:${ui.attachMenuOpen ? '0px' : 'max(1.75rem, env(safe-area-inset-bottom))'}; transform:translateZ(0);" class="absolute bottom-0 inset-x-0 z-20 ${ui.attachMenuOpen ? 'px-0' : 'px-3.5 sm:px-6'} pt-1 bg-transparent pointer-events-none">
-              <div id="typing-pill-bar" class="mb-1.5 flex justify-start transition-all duration-200 ${(ui.typingChatId === chat.id || ui.peerTypingRooms[chat.id]) ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none hidden'}">
-                <span class="px-3 py-1 rounded-full ${isPrivateMode ? 'glass-dark-pill text-white/85' : 'soft-bw-glass text-ink/80 dark:text-white/85'} text-[11.5px] font-semibold inline-flex items-center gap-1.5 shadow-sm">
-                  <span class="w-1.5 h-1.5 rounded-full bg-[#C6A76D] animate-pulse"></span>
-                  <span>${escapeHtml(chat.name.split(' ')[0])} is typing...</span>
-                </span>
-              </div>
+            <div id="composer-dock" style="padding-bottom:${ui.attachMenuOpen ? '0px' : 'max(1.75rem, env(safe-area-inset-bottom))'}; transform:translateZ(0);" class="absolute bottom-0 inset-x-0 z-20 ${ui.attachMenuOpen ? 'px-0' : 'px-3.5 sm:px-6'} pt-1 bg-transparent pointer-events-none">
+
               <div class="pointer-events-auto ${ui.attachMenuOpen ? 'space-y-2.5' : ''}">
               <div class="${ui.attachMenuOpen ? 'px-3.5 sm:px-6' : ''}">
               ${ui.replyingTo ? `
-                <div class="mb-2.5 px-3.5 py-2 rounded-2xl bg-surface dark:bg-zinc-900 flex items-center justify-between gap-2 text-[12.5px]">
+                <div id="reply-preview-bar" class="mb-2.5 px-3.5 py-2 rounded-2xl bg-surface dark:bg-zinc-900 flex items-center justify-between gap-2 text-[12.5px]">
                   <div class="min-w-0">
                     <span class="font-semibold text-brand-500">Replying to ${escapeHtml(ui.replyingTo.sender)}: </span>
                     <span class="text-muted truncate">${escapeHtml(ui.replyingTo.text)}</span>
@@ -5361,12 +5899,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     `;
                   })()}
                   <div id="composer-pill" class="${isPrivateMode ? 'glass-dark-pill' : 'soft-bw-glass'} ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5">
-                    <input id="message-input" type="text" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none" />
+                    <input id="message-input" type="text" enterkeyhint="send" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none" />
                     <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isPrivateMode ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-ink/70 dark:text-white/75 hover:text-ink dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'} transition">
                       ${icon('camera', 'w-[20px] h-[20px]')}
                     </button>
                   </div>
-                  <button id="chat-upi-btn" type="button" data-action="open-modal" data-modal="upi" title="Send or Request UPI" class="w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] transition-transform duration-150 hover:scale-105 active:scale-95">
+                  <button id="chat-upi-btn" type="button" data-action="open-modal" data-modal="upi" title="Send or Request UPI" class="upi-merge-btn ${(document.activeElement && document.activeElement.id === 'message-input') || ((ui.draftsByChat && ui.draftsByChat[chat.id] || '').trim().length > 0) ? 'upi-merged' : ''} h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] hover:scale-105 active:scale-95">
                     <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M6 4h12"/>
                       <path d="M6 9h12"/>
@@ -5376,7 +5914,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Hold &amp; swipe left for Walkie-Talkie" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] transition-transform duration-150 hover:scale-105 active:scale-95">
                     ${icon('mic', 'w-[20px] h-[20px]')}
                   </button>
-                  <button id="chat-send-btn" type="button" data-action="send-chat-now" title="Send" onmousedown="event.preventDefault()" ontouchstart="event.preventDefault()" class="hidden w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
+                  <button id="chat-send-btn" type="button" data-action="send-chat-now" title="Send" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" ontouchstart="event.preventDefault()" class="hidden w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
                     <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
                   </button>
                 </form>
@@ -5435,6 +5973,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 canvas.width = w;
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, 0, 0, w, h);
                 resolve(canvas.toDataURL('image/jpeg', quality || 0.78));
               } catch (e) { resolve(dataUrl); }
@@ -5693,7 +6233,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
 
         return `
-          <div data-msg-bubble="${msg.id}" data-msg-side="${isMe ? 'me' : 'other'}" class="group relative flex flex-col ${isMe ? 'items-end pl-10' : 'items-start pr-10'} animate-fade will-change-transform">
+          <div data-msg-bubble="${msg.id}" data-msg-sig="${escapeHtml(getMsgSig(msg))}" data-msg-side="${isMe ? 'me' : 'other'}" class="group relative flex flex-col ${isMe ? 'items-end pl-10' : 'items-start pr-10'} animate-fade will-change-transform">
             <span data-swipe-reply-icon class="pointer-events-none absolute ${isMe ? 'right-0 translate-x-10' : 'left-0 -translate-x-10'} top-1/2 -translate-y-1/2 w-8 h-8 rounded-full glass-pill text-ink dark:text-white flex items-center justify-center opacity-0 scale-75 transition-opacity">
               ${icon('reply', 'w-4 h-4')}
             </span>
@@ -5943,6 +6483,33 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       <button type="submit" class="px-5 py-2.5 rounded-full bg-ink dark:bg-white text-white dark:text-ink text-[13px] font-semibold shrink-0">Save name</button>
                     </form>
                   </div>
+                  <!-- Active Devices (shavlo_sessions) -->
+                  <div class="ios-card p-5 rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <div class="text-[15px] font-semibold">Active Devices</div>
+                        <div class="text-[12px] text-muted">Devices connected to your Shavlo account</div>
+                      </div>
+                      <span class="text-[11.5px] font-bold text-muted">${(ui.activeSessions || []).length || 1} active</span>
+                    </div>
+                    <div class="divide-y divide-zinc-100 dark:divide-zinc-900">
+                      ${(() => {
+                        const myDevId = (() => { try { return localStorage.getItem('shavlo_device_id_v1') || ''; } catch (e) { return ''; } })();
+                        const list = (ui.activeSessions && ui.activeSessions.length) ? ui.activeSessions : [{ id: myDevId || 'this', device_name: 'This Device', last_active: Date.now() }];
+                        return list.map(s => `
+                          <div class="py-2.5 flex items-center justify-between gap-2 text-[13px]">
+                            <div class="min-w-0">
+                              <div class="font-semibold text-ink dark:text-white flex items-center gap-1.5">
+                                <span>${escapeHtml(s.device_name || 'Device')}</span>
+                                ${s.id === myDevId ? '<span class="px-2 py-0.5 rounded-full bg-[#C6A76D]/20 text-[#C6A76D] text-[10px] font-bold">This device</span>' : ''}
+                              </div>
+                            </div>
+                            ${s.id !== myDevId ? `<button type="button" data-action="remove-session" data-id="${escapeHtml(s.id)}" class="px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-950/35 text-rose-600 dark:text-rose-400 text-[11.5px] font-semibold hover:opacity-85 transition">Sign out</button>` : ''}
+                          </div>
+                        `).join('');
+                      })()}
+                    </div>
+                  </div>
                 ` : `
                   <!-- SETTINGS TAB: Day / Night Mode -->
                   <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3">
@@ -6043,42 +6610,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     </form>
                   </div>
 
-                  <!-- SETTINGS TAB: Multi-Device Cloud Sync (Supabase) -->
-                  <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3.5">
-                    <div class="flex items-center justify-between gap-2">
-                      <div>
-                        <div class="text-[15px] font-semibold">Cloud Sync (Supabase)</div>
-                        <div class="text-[12.5px] text-muted">Connect your free Supabase project for live cross-phone chat</div>
-                      </div>
-                      <span class="px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${(supaStatus === 'realtime' || supaStatus === 'connected') ? 'bg-zinc-900/10 dark:bg-white/15 text-ink dark:text-white' : supaStatus === 'error' ? 'bg-rose-500/15 text-rose-600' : 'bg-surface dark:bg-zinc-900 text-muted'}">
-                        ${supaStatus === 'realtime' ? 'Realtime ⚡' : supaStatus === 'connected' ? 'Cloud Sync ●' : supaStatus === 'error' ? 'Error' : 'Local Mode'}
-                      </span>
+                  <!-- SETTINGS TAB: Clean End-User Connection Status -->
+                  <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 flex items-center justify-between gap-3">
+                    <div>
+                      <div class="text-[15px] font-semibold">Live Sync</div>
+                      <div class="text-[12.5px] text-muted">Encrypted real-time messaging &amp; calls</div>
                     </div>
-                    ${supaLastError ? `<div class="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 text-[12px] font-medium">${escapeHtml(supaLastError)}</div>` : ''}
-                    <form id="supabase-cfg-form" class="space-y-2.5">
-                      <div>
-                        <label class="block text-[12px] font-semibold text-muted mb-1">Supabase Project URL</label>
-                        <input name="supaUrl" type="url" value="${escapeHtml((getSupaCfg() && getSupaCfg().url) || '')}" placeholder="https://your-project.supabase.co" class="w-full h-11 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px] font-sans tabular-nums focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
-                      </div>
-                      <div>
-                        <label class="block text-[12px] font-semibold text-muted mb-1">Supabase Anon Public Key</label>
-                        <input name="supaKey" type="password" value="${escapeHtml((getSupaCfg() && getSupaCfg().key) || '')}" placeholder="eyJhbGciOiJIUzI1NiIs..." class="w-full h-11 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px] font-sans tabular-nums focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
-                      </div>
-                      <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-                        <div class="flex flex-wrap items-center gap-1.5">
-                          <button type="button" data-action="copy-supa-sql" class="px-3.5 py-2 rounded-full bg-surface dark:bg-zinc-900 hover:bg-brand-50 text-[12px] font-semibold transition">Copy SQL Setup</button>
-                          ${getSupaCfg() ? `<button type="button" data-action="copy-supa-invite" class="px-3.5 py-2 rounded-full bg-brand-50 dark:bg-brand-600/20 text-brand-600 dark:text-brand-100 text-[12px] font-semibold transition">Copy Invite Link</button>` : ''}
-                        </div>
-                        <div class="flex items-center gap-2">
-                          ${getSupaCfg() ? `<button type="button" data-action="disconnect-supa" class="px-3.5 py-2 rounded-full text-[12px] font-semibold text-rose-600 hover:bg-rose-50 transition">Disconnect</button>` : ''}
-                          <button type="submit" class="px-5 py-2 rounded-full bg-brand-500 hover:bg-brand-600 text-white text-[12.5px] font-semibold transition">Connect &amp; Sync</button>
-                        </div>
-                      </div>
-                      <div class="pt-3 mt-2 border-t border-black/[0.06] dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
-                        <button type="button" data-action="open-modal" data-modal="turnPushCfg" class="px-3.5 py-2 rounded-full bg-surface dark:bg-zinc-900 text-[12px] font-semibold text-ink dark:text-white hover:opacity-85 transition">Configure TURN &amp; Push</button>
-                        <span class="text-[11px] text-muted">${localStorage.getItem('shavlo_turn_cfg_v1') ? 'TURN Active ●' : 'STUN Default'}</span>
-                      </div>
-                    </form>
+                    <span class="px-3 py-1 rounded-full text-[11.5px] font-bold shrink-0 ${(supaStatus === 'realtime' || supaStatus === 'connected') ? 'bg-zinc-900/10 dark:bg-white/15 text-ink dark:text-white' : supaStatus === 'error' ? 'bg-rose-500/15 text-rose-600' : 'bg-surface dark:bg-zinc-900 text-muted'}">
+                      ${supaStatus === 'realtime' ? 'Live ⚡' : supaStatus === 'connected' ? 'Connected ●' : supaStatus === 'error' ? 'Reconnecting' : 'Offline'}
+                    </span>
                   </div>
 
                   <!-- SETTINGS TAB: Blocked Users -->
@@ -6323,16 +6863,20 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     </button>
                   </form>
 
-                  <div class="pt-4 border-t border-zinc-200/70 dark:border-zinc-800 flex items-center gap-3.5">
-                    <div class="p-1.5 rounded-2xl bg-white border border-black/10 shrink-0 shadow-sm">
-                      <img src="${generateUpiQrDataUrl(buildFriendInviteUrl(state.userProfile.friendCode))}" alt="Your Friend QR" class="w-20 h-20 object-contain" />
-                    </div>
+                  <div class="pt-4 border-t border-zinc-200/70 dark:border-zinc-800 flex items-center gap-4">
+                    <button type="button" data-action="open-friend-qr-zoom" title="Tap to enlarge QR" class="group relative p-2 rounded-2xl bg-white border border-black/10 shrink-0 shadow-sm hover:shadow-md active:scale-95 transition">
+                      <img src="${generateUpiQrDataUrl(buildFriendInviteUrl(state.userProfile.friendCode))}" alt="Your Friend QR" style="image-rendering:pixelated;" class="w-28 h-28 object-contain" />
+                      <span class="block text-[10px] font-semibold text-zinc-500 mt-1">Tap to enlarge</span>
+                    </button>
                     <div class="min-w-0 flex-1">
                       <div class="text-[12.5px] font-medium text-muted">Your code &amp; QR</div>
-                      <div class="font-sans tabular-nums font-bold text-[17px] tracking-tight text-ink dark:text-white select-all mt-0.5">${escapeHtml(state.userProfile.friendCode)}</div>
-                      <div class="flex items-center gap-2 mt-2">
+                      <div class="font-sans tabular-nums font-bold text-[18px] tracking-tight text-ink dark:text-white select-all mt-0.5">${escapeHtml(state.userProfile.friendCode)}</div>
+                      <div class="flex flex-wrap items-center gap-2 mt-2.5">
                         <button type="button" data-action="copy-raw" data-text="${escapeHtml(state.userProfile.friendCode)}" class="px-3 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12px] font-semibold text-ink dark:text-white inline-flex items-center gap-1 hover:opacity-80 transition">
                           ${icon('copy', 'w-3.5 h-3.5')}<span>Copy code</span>
+                        </button>
+                        <button type="button" data-action="open-friend-qr-zoom" class="px-3 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-semibold inline-flex items-center gap-1 hover:opacity-85 transition">
+                          <span>Enlarge QR</span>
                         </button>
                       </div>
                     </div>
@@ -6340,6 +6884,60 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </div>
               `}
             </div>
+          `;
+        } else if (ui.modal === 'friendQrZoom') {
+          const invUrl = buildFriendInviteUrl(state.userProfile.friendCode);
+          inner = `
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="title-display font-bold text-[20px] leading-tight">Your Friend QR</h3>
+                <p class="text-[12px] text-muted mt-0.5">Ask your friend to scan this to send a request</p>
+              </div>
+              <button data-action="back-to-friends" class="p-1.5 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <div class="flex flex-col items-center py-2">
+              <div class="p-4 rounded-3xl bg-white border border-black/10 shadow-md">
+                <img src="${generateUpiQrDataUrl(invUrl)}" alt="Enlarged Friend QR" style="image-rendering:pixelated;" class="w-64 h-64 object-contain" />
+              </div>
+              <div class="mt-3 text-center">
+                <div class="font-display font-bold text-[17px] text-ink dark:text-white">${escapeHtml(state.userProfile.name || 'You')}</div>
+                <div class="font-sans tabular-nums font-bold text-[15px] text-[#C6A76D] tracking-wide mt-0.5">${escapeHtml(state.userProfile.friendCode)}</div>
+              </div>
+              <div class="flex items-center gap-2 mt-4 w-full">
+                <button type="button" data-action="copy-raw" data-text="${escapeHtml(invUrl)}" class="flex-1 h-10 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-ink dark:text-white inline-flex items-center justify-center gap-1.5 hover:opacity-85 transition">
+                  ${icon('copy', 'w-3.5 h-3.5')}<span>Copy Link</span>
+                </button>
+                <button type="button" data-action="back-to-friends" class="flex-1 h-10 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13px] font-semibold inline-flex items-center justify-center hover:opacity-85 transition">
+                  Back
+                </button>
+              </div>
+            </div>
+          `;
+        } else if (ui.modal === 'qrScanner') {
+          inner = `
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h3 class="title-display font-bold text-[20px] leading-tight">Scan Friend QR</h3>
+                <p class="text-[12px] text-muted mt-0.5">Point camera at a Shavlo Friend QR code</p>
+              </div>
+              <button data-action="back-to-friends" class="p-1.5 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <div class="relative w-full aspect-square max-h-[300px] rounded-3xl overflow-hidden bg-black border border-white/15 flex items-center justify-center">
+              <video id="qr-scan-video" playsinline muted autoplay class="w-full h-full object-cover"></video>
+              <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div class="w-48 h-48 rounded-3xl border-2 border-[#C6A76D]/90 shadow-[0_0_0_9999px_rgba(0,0,0,0.38)]"></div>
+              </div>
+            </div>
+            <p id="qr-scan-status" class="text-[12.5px] text-center text-muted mt-3">Starting camera...</p>
+            <div class="flex items-center gap-2 mt-3">
+              <button type="button" data-action="pick-friend-qr-file" class="flex-1 h-10 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-ink dark:text-white inline-flex items-center justify-center gap-1.5 hover:opacity-85 transition">
+                <span>Upload QR Photo</span>
+              </button>
+              <button type="button" data-action="back-to-friends" class="px-5 h-10 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13px] font-semibold inline-flex items-center justify-center hover:opacity-85 transition">
+                Cancel
+              </button>
+            </div>
+            <input id="friend-qr-file-input" type="file" accept="image/*" class="sr-only" />
           `;
         } else if (ui.modal === 'friendRequests') {
           inner = `
@@ -6461,6 +7059,21 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </div>
             </div>
           `;
+        } else if (ui.modal === 'contactPhotoZoom' && chat && chat.avatarUrl) {
+          inner = `
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="title-display font-bold text-[19px] truncate pr-2">${escapeHtml(chat.name)}</h3>
+              <button type="button" data-action="back-to-contact-menu" class="p-1.5 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <div class="flex flex-col items-center">
+              <div class="w-full max-w-[300px] aspect-square rounded-3xl overflow-hidden bg-zinc-950 border border-black/10 dark:border-white/15 shadow-xl">
+                <img src="${safeImgUrl(chat.avatarUrl)}" alt="${escapeHtml(chat.name)}" class="w-full h-full object-cover" />
+              </div>
+              <button type="button" data-action="back-to-contact-menu" class="mt-4 w-full h-10 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold hover:opacity-85 transition">
+                Back to Contact
+              </button>
+            </div>
+          `;
         } else if (ui.modal === 'contactMenu' && chat) {
           ensureSecurityDefaults();
           inner = `
@@ -6469,7 +7082,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <button data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
             </div>
             <div class="flex flex-col items-center text-center pb-4 border-b border-zinc-100 dark:border-zinc-800">
-              ${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-16 h-16 text-[22px]', chat.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+              ${chat.avatarUrl ? `
+                <button type="button" data-action="open-contact-photo-zoom" title="Tap to view large photo" class="rounded-full p-[2.5px] border-2 border-[#C6A76D]/75 hover:scale-105 active:scale-95 transition shadow-sm">
+                  ${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-20 h-20 text-[24px]', chat.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+                </button>
+              ` : `
+                ${renderAvatar(chat.avatarText, '', 'w-16 h-16 text-[22px]', chat.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+              `}
               <div class="title-display font-bold text-[20px] mt-2.5">${escapeHtml(chat.name)}</div>
               <div class="text-[13px] text-muted">${escapeHtml(chat.subtitle)}</div>
               <div class="text-[12px] font-sans tabular-nums text-brand-500 mt-1">${escapeHtml(chat.upiId)}</div>
@@ -6588,19 +7207,60 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </div>
             </div>
           `;
+        } else if (ui.modal === 'upiLaunch' && ui.pendingUpiPay) {
+          const p = ui.pendingUpiPay;
+          const qp = p.upiUri.replace(/^upi:\/\/pay\?/, '');
+          inner = `
+            <div class="flex items-center justify-between mb-3">
+              <div class="min-w-0">
+                <h3 class="title-display font-bold text-[19px] leading-tight">Complete UPI Payment</h3>
+                <p class="text-[12px] text-muted mt-0.5 truncate">To ${escapeHtml(p.receiverName)} • ${escapeHtml(p.receiverUpi)}</p>
+              </div>
+              <button type="button" data-action="cancel-upi-launch" class="p-1.5 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <div class="flex flex-col items-center p-4 rounded-3xl bg-black/[0.03] dark:bg-white/[0.05] border border-black/[0.06] dark:border-white/10">
+              <div class="title-display text-[26px] font-extrabold text-ink dark:text-white tabular-nums">${formatRupees(p.amount)}</div>
+              <div class="mt-2.5 p-2.5 rounded-2xl bg-white border border-black/10 shadow-sm">
+                <img src="${escapeHtml(generateUpiQrDataUrl(p.upiUri))}" alt="Pay UPI QR" style="image-rendering:pixelated;" class="w-40 h-40 object-contain" />
+              </div>
+              <div class="grid grid-cols-2 gap-2 w-full mt-3">
+                <a href="${escapeHtml(p.upiUri)}" class="h-9 rounded-xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold flex items-center justify-center hover:opacity-85 transition">Open UPI App</a>
+                <a href="${escapeHtml('tez://upi/pay?' + qp)}" class="h-9 rounded-xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">GPay</a>
+                <a href="${escapeHtml('phonepe://pay?' + qp)}" class="h-9 rounded-xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">PhonePe</a>
+                <a href="${escapeHtml('paytmmp://pay?' + qp)}" class="h-9 rounded-xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">Paytm</a>
+              </div>
+            </div>
+            <div class="mt-3 space-y-2.5">
+              <input id="upi-utr-input" type="text" maxlength="24" placeholder="Optional UTR / Ref number" class="w-full h-10 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[13px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
+              <div class="flex items-center gap-2">
+                <button type="button" data-action="confirm-upi-launch" class="flex-1 h-11 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-bold hover:opacity-90 transition">I've Paid • Confirm</button>
+                <button type="button" data-action="cancel-upi-launch" class="px-4 h-11 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-muted hover:text-ink transition">Cancel</button>
+              </div>
+            </div>
+          `;
         } else if (ui.modal === 'upi') {
           ensureSecurityDefaults();
           const remaining = Math.max(0, ((state.security && state.security.dailyLimit) || 25000) - getTodaySpend());
           const pre = ui.upiPrefill || {};
           inner = `
             <div class="w-10 h-1 rounded-full bg-black/15 dark:bg-white/20 mx-auto mb-3 sm:hidden"></div>
-            <div class="flex items-center justify-between mb-3.5 px-0.5">
-              <div>
+            <div class="flex items-center justify-between mb-3 px-0.5 gap-2">
+              <div class="min-w-0">
                 <h3 class="title-display font-bold text-[20px] tracking-[-0.025em] text-ink dark:text-white leading-tight">Secure UPI</h3>
-                <p class="text-[12px] font-medium text-muted mt-0.5 tabular-nums">${ui.upiTab === 'send' && chat ? `To: ${escapeHtml(chat.name)} • ${escapeHtml(chat.upiId || '')}` : escapeHtml(state.userProfile.upiHandle || 'kim.siddhuu@okaxis')}</p>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <p class="text-[12px] font-medium text-muted tabular-nums truncate">${ui.upiTab === 'send' && chat ? `To: ${escapeHtml(chat.name)} • ${escapeHtml(chat.upiId || '')}` : escapeHtml(state.userProfile.upiId || state.userProfile.upiHandle || 'Not set')}</p>
+                  <button type="button" data-action="toggle-edit-upi-id" class="px-2 py-0.5 rounded-full bg-black/[0.06] dark:bg-white/[0.1] hover:bg-[#09090C] hover:text-white dark:hover:bg-white dark:hover:text-[#09090C] text-[10.5px] font-bold text-ink dark:text-white shrink-0 transition">${(state.userProfile.upiId || state.userProfile.upiHandle) ? 'Edit UPI ID' : '+ Add UPI ID'}</button>
+                </div>
               </div>
-              <button type="button" data-action="close-modal" class="w-8 h-8 rounded-full bg-black/[0.05] dark:bg-white/[0.08] flex items-center justify-center text-muted hover:text-ink dark:hover:text-white transition">${icon('close', 'w-4 h-4')}</button>
+              <button type="button" data-action="close-modal" class="w-8 h-8 rounded-full bg-black/[0.05] dark:bg-white/[0.08] flex items-center justify-center text-muted hover:text-ink dark:hover:text-white shrink-0 transition">${icon('close', 'w-4 h-4')}</button>
             </div>
+            ${ui.editingUpiId ? `
+              <form id="edit-upi-id-form" class="mb-3 p-2.5 rounded-2xl bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/10 flex items-center gap-2">
+                <input name="upiId" type="text" required value="${escapeHtml(state.userProfile.upiId || state.userProfile.upiHandle || '')}" placeholder="yourname@okaxis" class="flex-1 min-w-0 h-9 px-3 rounded-xl bg-white dark:bg-zinc-900 text-[13.5px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
+                <button type="submit" class="h-9 px-3.5 rounded-xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold shrink-0">Save</button>
+                <button type="button" data-action="toggle-edit-upi-id" class="h-9 px-2.5 rounded-xl bg-black/[0.06] dark:bg-white/[0.1] text-[12px] font-semibold text-muted shrink-0">Cancel</button>
+              </form>
+            ` : ''}
             <div class="grid grid-cols-3 p-1 rounded-full bg-black/[0.045] dark:bg-white/[0.07] mb-4">
               <button type="button" data-action="upi-tab" data-tab="send" class="py-2 rounded-full text-[12.5px] font-semibold tracking-[-0.01em] transition ${ui.upiTab === 'send' ? 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C] shadow-sm' : 'text-muted'}">Send</button>
               <button type="button" data-action="upi-tab" data-tab="request" class="py-2 rounded-full text-[12.5px] font-semibold tracking-[-0.01em] transition ${ui.upiTab === 'request' ? 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C] shadow-sm' : 'text-muted'}">Request</button>
@@ -6637,10 +7297,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     <span>${formatRupees(Number(ui.requestQrAmt))} • Scan to Pay</span>
                   </div>
                   <div class="w-40 h-40 mx-auto rounded-[22px] bg-white p-2.5 border border-black/[0.07] shadow-sm overflow-hidden">
-                    <img src="${escapeHtml(generateUpiQrDataUrl(`upi://pay?pa=${encodeURIComponent(state.userProfile.upiHandle || 'kim.siddhuu@okaxis')}&pn=${encodeURIComponent(state.userProfile.name || 'User')}&am=${encodeURIComponent(Number(ui.requestQrAmt))}&cu=INR`))}" alt="UPI Request QR" class="w-full h-full object-contain" />
+                    <img src="${escapeHtml(generateUpiQrDataUrl(`upi://pay?pa=${encodeURIComponent((state.userProfile.upiId || state.userProfile.upiHandle || 'kim.siddhuu@okaxis'))}&pn=${encodeURIComponent(state.userProfile.name || 'User')}&am=${encodeURIComponent(Number(ui.requestQrAmt))}&cu=INR`))}" alt="UPI Request QR" class="w-full h-full object-contain" />
                   </div>
                   <p class="title-display text-[15px] font-bold tracking-[-0.015em] text-ink dark:text-white mt-3">${escapeHtml(state.userProfile.name)}</p>
-                  <p class="text-[11.5px] text-muted tabular-nums mt-0.5">${escapeHtml(state.userProfile.upiHandle || 'kim.siddhuu@okaxis')}</p>
+                  <p class="text-[11.5px] text-muted tabular-nums mt-0.5">${escapeHtml((state.userProfile.upiId || state.userProfile.upiHandle || 'kim.siddhuu@okaxis'))}</p>
                 </div>
                 <div class="grid grid-cols-2 gap-2.5 shrink-0">
                   <button type="button" data-action="req-change-amount" class="py-3 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[13.5px] font-semibold text-ink dark:text-white hover:bg-black/[0.09] transition">Edit</button>
@@ -7065,10 +7725,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
             <div class="space-y-2.5">
               <label for="profile-photo-input" class="w-full py-3 px-4 rounded-2xl bg-ink dark:bg-white text-white dark:text-ink text-[14.5px] font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:ring-2 hover:ring-[#C6A76D]/70">
-                <span>Change profile</span>
+                <span>Upload new photo</span>
               </label>
               <button type="button" data-action="remove-avatar" class="w-full py-3 px-4 rounded-2xl bg-rose-50 dark:bg-rose-950/35 text-rose-600 dark:text-rose-400 text-[14.5px] font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm hover:bg-rose-100 dark:hover:bg-rose-950/55">
-                Remove
+                Delete photo
               </button>
             </div>
           `;
@@ -7810,6 +8470,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.modal = btn.dataset.modal;
           renderModal();
         } else if (action === 'close-modal' || (action === 'close-modal-backdrop' && e.target === btn)) {
+            if (typeof stopQrScanner === 'function') stopQrScanner();
             ui.pendingUnlockChatId = null;
             ui.photoDraft = null;
             ui.shavloVaultPinError = '';
@@ -8032,9 +8693,26 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             el.classList.add('ring-2', 'ring-[#C6A76D]', 'rounded-2xl', 'transition');
             setTimeout(() => { el.classList.remove('ring-2', 'ring-[#C6A76D]', 'rounded-2xl'); }, 1300);
           }
-        } else if (action === 'open-friend-qr-scan') {
+        } else if (action === 'open-contact-photo-zoom') {
+          ui.modal = 'contactPhotoZoom';
+          renderModal();
+        } else if (action === 'back-to-contact-menu') {
+          ui.modal = 'contactMenu';
+          renderModal();
+        } else if (action === 'open-friend-qr-zoom') {
+          ui.modal = 'friendQrZoom';
+          renderModal();
+        } else if (action === 'back-to-friends') {
+          if (typeof stopQrScanner === 'function') stopQrScanner();
+          ui.modal = 'friendsHub';
+          renderModal();
+        } else if (action === 'pick-friend-qr-file') {
           const fqInp = document.getElementById('friend-qr-file-input');
           if (fqInp) fqInp.click();
+        } else if (action === 'open-friend-qr-scan') {
+          ui.modal = 'qrScanner';
+          renderModal();
+          setTimeout(() => { if (typeof startQrScanner === 'function') startQrScanner(); }, 40);
         } else if (action === 'load-older-msgs') {
           loadOlderMessages(btn.dataset.id);
         } else if (action === 'open-camera-capture') {
@@ -8065,8 +8743,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           renderModal();
         } else if (action === 'remove-vault-item') {
           ensureSecurityDefaults();
+          const deadV = (state.security.shavloVaultItems || []).find(x => x.id === btn.dataset.id);
           state.security.shavloVaultItems = (state.security.shavloVaultItems || []).filter(x => x.id !== btn.dataset.id);
           persistCurrentVault();
+          if (deadV && deadV.url) deleteMediaFromSupabaseStorage(deadV.url);
+          if (activeVaultId && getSupaCfg() && btn.dataset.id) {
+            supaWriteReliable('shavlo_vault_items', 'DELETE', `?id=eq.${encodeURIComponent(btn.dataset.id)}`);
+          }
           renderModal();
           showToast('Removed from shavlo Vault');
         } else if (action === 'toggle-photo-24h') {
@@ -8265,16 +8948,18 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'apply-avatar-crop') {
           applyAvatarCrop();
         } else if (action === 'remove-upi-barcode') {
+          const oldUpiQr = state.userProfile.upiBarcodeUrl || '';
           state.userProfile.upiBarcodeUrl = '';
           persistCurrentVault();
+          if (oldUpiQr) deleteMediaFromSupabaseStorage(oldUpiQr);
           render();
-          showToast('UPI QR code removed');
+          showToast('UPI QR code deleted from device & Supabase');
         } else if (action === 'share-upi-barcode') {
           const url = safeImgUrl(state.userProfile.upiBarcodeUrl);
           if (url) {
             const targetChat = getSelectedChat() || getMergedChats()[0];
             if (targetChat) {
-              pushMessageToChat(targetChat, { id: 'm_qr_' + Date.now(), sender: 'me', senderName: 'You', type: 'qr', amount: 0, payeeName: state.userProfile.name || 'User', upiId: state.userProfile.upiHandle || 'kim.siddhuu@okaxis', qrUrl: url, paid: false, time: nowTime(), status: 'sent', reactions: [], starred: false });
+              pushMessageToChat(targetChat, { id: 'm_qr_' + Date.now(), sender: 'me', senderName: 'You', type: 'qr', amount: 0, payeeName: state.userProfile.name || 'User', upiId: (state.userProfile.upiId || state.userProfile.upiHandle || 'kim.siddhuu@okaxis'), qrUrl: url, paid: false, time: nowTime(), status: 'sent', reactions: [], starred: false });
               ui.modal = null;
               ui.upiPrefill = null;
               renderModal();
@@ -8287,13 +8972,39 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               showToast('UPI QR code shared in ' + targetChat.name);
             }
           }
+        } else if (action === 'remove-session') {
+          const sid = btn.dataset.id;
+          if (sid) {
+            ui.activeSessions = (ui.activeSessions || []).filter(s => s.id !== sid);
+            if (getSupaCfg()) supaWriteReliable('shavlo_sessions', 'DELETE', `?id=eq.${encodeURIComponent(sid)}`);
+            render();
+            showToast('Device signed out');
+          }
         } else if (action === 'remove-avatar') {
+          const oldAvatarUrl = state.userProfile.avatarUrl || '';
           state.userProfile.avatarUrl = '';
+          state.userProfile.avatarUpdatedAt = Date.now();
           ui.modal = null;
           persistCurrentVault();
           registerCurrentUserInDirectory();
           render();
-          showToast('Profile picture removed');
+          if (oldAvatarUrl) deleteMediaFromSupabaseStorage(oldAvatarUrl);
+          pushUserToSupabase();
+          showToast('Profile photo deleted from device & Supabase');
+        } else if (action === 'confirm-upi-launch') {
+          const utrEl = document.getElementById('upi-utr-input');
+          finalizePendingUpiPay(utrEl ? utrEl.value : '');
+        } else if (action === 'cancel-upi-launch') {
+          const p = ui.pendingUpiPay;
+          if (p && p.txnId && activeVaultId) {
+            supaWriteReliable('shavlo_upi_txns', 'PATCH', `?id=eq.${encodeURIComponent(p.txnId)}`, { status: 'cancelled' });
+          }
+          ui.pendingUpiPay = null;
+          ui.modal = null;
+          renderModal();
+        } else if (action === 'toggle-edit-upi-id') {
+          ui.editingUpiId = !ui.editingUpiId;
+          renderModal();
         } else if (action === 'upi-preset') {
           const inp = document.getElementById('upi-amount-input');
           if (inp) { inp.value = btn.dataset.val; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); }
@@ -8304,7 +9015,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const chat = getSelectedChat();
           const a = Number(btn.dataset.amt || 0);
           if (chat && a > 0) {
-            const upiId = state.userProfile.upiHandle || 'kim.siddhuu@okaxis';
+            const upiId = (state.userProfile.upiId || state.userProfile.upiHandle || 'kim.siddhuu@okaxis');
             const payee = state.userProfile.name || 'User';
             const uri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payee)}&am=${encodeURIComponent(a)}&cu=INR`;
             const url = generateUpiQrDataUrl(uri);
@@ -8338,7 +9049,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'save-req-qr') {
           const a = Number(btn.dataset.amt || 0);
           if (a > 0) {
-            const uri = `upi://pay?pa=${encodeURIComponent(state.userProfile.upiHandle || 'kim.siddhuu@okaxis')}&pn=${encodeURIComponent(state.userProfile.name || 'User')}&am=${encodeURIComponent(a)}&cu=INR`;
+            const uri = `upi://pay?pa=${encodeURIComponent((state.userProfile.upiId || state.userProfile.upiHandle || 'kim.siddhuu@okaxis'))}&pn=${encodeURIComponent(state.userProfile.name || 'User')}&am=${encodeURIComponent(a)}&cu=INR`;
             const url = generateUpiQrDataUrl(uri);
             const link = document.createElement('a');
             link.href = url;
@@ -8675,10 +9386,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const curC = getSelectedChat();
           if (curC) { ui.draftsByChat = ui.draftsByChat || {}; ui.draftsByChat[curC.id] = e.target.value; }
           const hasText = e.target.value.trim().length > 0;
-          const sendBtn = document.getElementById('chat-send-btn');
-          const micBtn = document.getElementById('chat-mic-btn');
-          if (sendBtn) sendBtn.classList.toggle('hidden', !hasText);
-          if (micBtn) micBtn.classList.toggle('hidden', hasText);
+          if (typeof syncComposerActionButtons === 'function') syncComposerActionButtons(hasText, true);
           recordKeystrokeRhythm();
           const chat = getSelectedChat();
           if (chat && chat.isPeer) broadcastTyping(chat.id);
@@ -8766,12 +9474,33 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           render();
           renderModal();
           showToast('TURN & Push settings saved');
+        } else if (e.target.id === 'edit-upi-id-form') {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const nextUpi = (fd.get('upiId') || '').toString().trim().toLowerCase();
+          if (!isValidUpiHandle(nextUpi)) {
+            showToast('Enter a valid UPI ID like name@okaxis');
+            return;
+          }
+          state.userProfile.upiId = nextUpi;
+          state.userProfile.upiHandle = nextUpi;
+          ui.editingUpiId = false;
+          persistCurrentVault();
+          registerCurrentUserInDirectory();
+          pushUserToSupabase();
+          render();
+          renderModal();
+          showToast('UPI ID saved & synced');
         } else if (e.target.id === 'edit-username-form') {
+          e.preventDefault();
+          const fd = new FormData(e.target);
           const nextName = (fd.get('displayName') || '').toString().trim();
           if (!nextName) return;
           state.userProfile.name = nextName;
+          state.userProfile.avatarUpdatedAt = Date.now();
           persistCurrentVault();
           registerCurrentUserInDirectory();
+          pushUserToSupabase();
           ui.modal = null;
           render();
           renderModal();
@@ -8793,30 +9522,19 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (e.target.id === 'chat-composer') {
           e.preventDefault();
           const inp = document.getElementById('message-input');
-          if (inp && inp.value.trim()) { const val = inp.value; inp.value = ''; sendTextMessage(val); }
+          if (inp && inp.value.trim()) {
+            const val = inp.value;
+            inp.value = '';
+            sendTextMessage(val);
+            inp.focus({ preventScroll: true });
+          }
         } else if (e.target.id === 'upi-form') {
           e.preventDefault();
           const fd = new FormData(e.target);
           if (ui.upiTab === 'request') {
             sendMoneyRequest(fd.get('amount'), fd.get('note'), fd.get('chatId'));
           } else {
-            const pre = ui.upiPrefill ? { ...ui.upiPrefill } : {};
-            const ok = sendUpiPayment(fd.get('amount'), fd.get('note'), fd.get('chatId'), fd.get('upiPin'), fd.get('mode'));
-            if (ok && (pre.requestMsgId || pre.splitMsgId)) {
-              const chat = getSelectedChat();
-              if (chat && chat.isPeer) {
-                const net = getNetwork();
-                const list = net.peerChats[chat.id] || [];
-                if (pre.requestMsgId) { const rm = list.find(m => m.id === pre.requestMsgId); if (rm) rm.paid = true; }
-                if (pre.splitMsgId) { const sm = list.find(m => m.id === pre.splitMsgId); if (sm && sm.participants && sm.participants[pre.splitIdx]) sm.participants[pre.splitIdx].paid = true; }
-                saveNetwork(net, 'peer_update');
-              } else if (chat) {
-                if (pre.requestMsgId) { const rm = chat.messages.find(m => m.id === pre.requestMsgId); if (rm) rm.paid = true; }
-                if (pre.splitMsgId) { const sm = chat.messages.find(m => m.id === pre.splitMsgId); if (sm && sm.participants && sm.participants[pre.splitIdx]) sm.participants[pre.splitIdx].paid = true; }
-                persistCurrentVault();
-              }
-              render();
-            }
+            launchRealUpiPayment(fd.get('amount'), fd.get('note'), fd.get('chatId'), fd.get('upiPin'), fd.get('mode'));
           }
         } else if (e.target.id === 'supabase-cfg-form') {
           e.preventDefault();
@@ -8963,7 +9681,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const file = e.target.files[0];
           const reader = new FileReader();
           reader.onload = async () => {
-            ui.statusDraftPhoto = await compressImageDataUrl(reader.result, 960, 0.78);
+            ui.statusDraftPhoto = await compressImageDataUrl(reader.result, 1920, 0.92);
             ui.modal = 'newStatus';
             renderModal();
           };
@@ -9075,10 +9793,23 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           processChatMediaFile(picked, (dataUrl) => {
             ensureSecurityDefaults();
             state.security.shavloVaultItems = state.security.shavloVaultItems || [];
-            state.security.shavloVaultItems.unshift({ id: 'sv_' + Date.now(), url: dataUrl, time: nowTime() });
+            const vId = 'sv_' + Date.now();
+            const vItem = { id: vId, url: dataUrl, time: nowTime() };
+            state.security.shavloVaultItems.unshift(vItem);
             persistCurrentVault();
             renderModal();
             showToast('Saved to shavlo Vault');
+            if (activeVaultId && getSupaCfg()) {
+              uploadMediaToSupabaseStorage(dataUrl, 'vault', 'jpg').then((cdnUrl) => {
+                if (cdnUrl && /^https?:/i.test(cdnUrl)) {
+                  vItem.url = cdnUrl;
+                  persistCurrentVault();
+                }
+                supaWriteReliable('shavlo_vault_items', 'POST', '', {
+                  id: vId, vault_id: activeVaultId, payload: vItem, created_at: Date.now()
+                });
+              });
+            }
           });
         } else if (e.target && (e.target.id === 'chat-photo-input' || e.target.id === 'chat-gallery-file-input' || e.target.id === 'direct-gallery-input') && e.target.files && e.target.files[0]) {
           const pickedFile = e.target.files[0];
@@ -9123,27 +9854,26 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           processChatMediaFile(e.target.files[0], (dataUrl) => {
             ui.statusDraftPhoto = dataUrl;
             renderModal();
-          }, 720);
+          }, 1920);
         } else if (e.target && e.target.id === 'friend-qr-file-input' && e.target.files && e.target.files[0]) {
           const qrFile = e.target.files[0];
           e.target.value = '';
           (async () => {
             try {
-              if ('BarcodeDetector' in window) {
-                const det = new BarcodeDetector({ formats: ['qr_code'] });
-                const bmp = await createImageBitmap(qrFile);
-                const codes = await det.detect(bmp);
-                if (codes && codes[0] && codes[0].rawValue) {
-                  const fc = extractFriendCodeFromQr(codes[0].rawValue);
-                  if (fc) {
-                    sendFriendRequest(fc);
-                    return;
-                  }
+              const raw = await decodeQrFromFile(qrFile);
+              if (raw) {
+                const fc = extractFriendCodeFromQr(raw);
+                if (fc) {
+                  stopQrScanner();
+                  ui.modal = null;
+                  renderModal();
+                  sendFriendRequest(fc);
+                  return;
                 }
               }
-              showToast('Could not read QR — enter 9-digit code or scan with Phone Camera');
+              showToast('Could not read QR — try a clearer photo or enter 9-digit code');
             } catch (err) {
-              showToast('Scan with Phone Camera or enter 9-digit code');
+              showToast('Could not read QR — enter 9-digit code');
             }
           })();
         } else if (e.target && e.target.id === 'upi-scan-qr-input' && e.target.files && e.target.files[0]) {
@@ -9158,10 +9888,23 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const reader = new FileReader();
           reader.onload = async () => {
             if (typeof reader.result === 'string' && state) {
-              state.userProfile.upiBarcodeUrl = await compressImageDataUrl(reader.result, 960, 0.85);
+              const prevUpiQr = state.userProfile.upiBarcodeUrl || '';
+              const localUpiQr = await compressImageDataUrl(reader.result, 960, 0.85);
+              state.userProfile.upiBarcodeUrl = localUpiQr;
               persistCurrentVault();
               render();
-              showToast('UPI QR code uploaded');
+              showToast('Uploading UPI QR...');
+              uploadMediaToSupabaseStorage(localUpiQr, 'upi', 'jpg').then((cdnUrl) => {
+                if (cdnUrl && /^https?:/i.test(cdnUrl)) {
+                  if (prevUpiQr && prevUpiQr !== cdnUrl) deleteMediaFromSupabaseStorage(prevUpiQr);
+                  state.userProfile.upiBarcodeUrl = cdnUrl;
+                  persistCurrentVault();
+                  render();
+                  showToast('UPI QR synced to Supabase');
+                } else {
+                  showToast('UPI QR saved locally');
+                }
+              });
             }
           };
           reader.readAsDataURL(file);
@@ -9965,13 +10708,31 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ctx.rotate((ca.rotate * Math.PI) / 180);
           ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
           ctx.restore();
-          state.userProfile.avatarUrl = canvas.toDataURL('image/jpeg', 0.88);
+          const prevAvatarUrl = state.userProfile.avatarUrl || '';
+          const localDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          state.userProfile.avatarUrl = localDataUrl;
+          state.userProfile.avatarUpdatedAt = Date.now();
           ui.cropAvatar = null;
           ui.modal = null;
           persistCurrentVault();
           registerCurrentUserInDirectory();
           render();
-          showToast('Profile picture updated');
+          showToast('Uploading profile photo...');
+          uploadMediaToSupabaseStorage(localDataUrl, 'avatars', 'jpg').then((cdnUrl) => {
+            if (cdnUrl && /^https?:/i.test(cdnUrl)) {
+              if (prevAvatarUrl && prevAvatarUrl !== cdnUrl) deleteMediaFromSupabaseStorage(prevAvatarUrl);
+              state.userProfile.avatarUrl = cdnUrl;
+              state.userProfile.avatarUpdatedAt = Date.now();
+              persistCurrentVault();
+              registerCurrentUserInDirectory();
+              pushUserToSupabase();
+              render();
+              showToast('Profile photo synced to Supabase');
+            } else {
+              pushUserToSupabase();
+              showToast('Profile photo saved locally');
+            }
+          });
         };
         img.src = ca.src;
       }
@@ -10226,14 +10987,178 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }
       if (window.visualViewport) {
         const syncVvHeight = () => {
+          const vv = window.visualViewport;
           const appEl = document.getElementById('app');
-          if (appEl) appEl.style.height = Math.round(window.visualViewport.height) + 'px';
-          if (window.scrollY !== 0) window.scrollTo(0, 0);
+          const kbOpen = (window.innerHeight - vv.height) > 110;
+          document.documentElement.classList.toggle('kb-open', kbOpen);
+          if (appEl) {
+            appEl.style.top = Math.max(0, Math.round(vv.offsetTop)) + 'px';
+            appEl.style.height = Math.round(vv.height) + 'px';
+            appEl.style.transform = '';
+          }
+          if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+          if (kbOpen) {
+            const feed = document.getElementById('message-feed');
+            if (feed) feed.scrollTop = feed.scrollHeight;
+          }
         };
         window.visualViewport.addEventListener('resize', syncVvHeight, { passive: true });
+        window.visualViewport.addEventListener('scroll', syncVvHeight, { passive: true });
+        window.syncComposerActionButtons = function(hasText, isFocused) {
+          const sendBtn = document.getElementById('chat-send-btn');
+          const micBtn = document.getElementById('chat-mic-btn');
+          const upiBtn = document.getElementById('chat-upi-btn');
+          if (sendBtn) sendBtn.classList.toggle('hidden', !hasText);
+          if (micBtn) micBtn.classList.toggle('hidden', hasText);
+          if (upiBtn) {
+            const hideUpi = Boolean(isFocused || hasText);
+            upiBtn.classList.toggle('upi-merged', hideUpi);
+          }
+        };
+        document.addEventListener('focusin', (ev) => {
+          const t = ev.target;
+          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+            if (t.id === 'message-input') {
+              if (ui.attachMenuOpen) {
+                ui.attachMenuOpen = false;
+                render();
+                setTimeout(() => {
+                  const mi = document.getElementById('message-input');
+                  if (mi) mi.focus();
+                }, 0);
+              }
+              window.syncComposerActionButtons(t.value.trim().length > 0, true);
+            }
+            setTimeout(syncVvHeight, 40);
+            setTimeout(syncVvHeight, 140);
+            setTimeout(syncVvHeight, 300);
+          }
+        });
+        document.addEventListener('focusout', (ev) => {
+          const t = ev.target;
+          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+            if (t.id === 'message-input') {
+              setTimeout(() => {
+                const mi = document.getElementById('message-input');
+                const stillFocused = document.activeElement === mi;
+                const hasText = mi ? mi.value.trim().length > 0 : false;
+                window.syncComposerActionButtons(hasText, stillFocused);
+              }, 90);
+            }
+            setTimeout(syncVvHeight, 120);
+          }
+        });
         syncVvHeight();
       }
       render();
+
+      let _qrScanStream = null;
+      let _qrScanTimer = null;
+      let _qrScanBusy = false;
+
+      function stopQrScanner() {
+        if (_qrScanTimer) { clearInterval(_qrScanTimer); _qrScanTimer = null; }
+        _qrScanBusy = false;
+        if (_qrScanStream) {
+          try { _qrScanStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+          _qrScanStream = null;
+        }
+        const vid = document.getElementById('qr-scan-video');
+        if (vid) { try { vid.srcObject = null; } catch (e) {} }
+      }
+
+      async function decodeQrFromCanvas(canvas) {
+        try {
+          if (typeof window.jsQR === 'function') {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const res = window.jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
+            if (res && res.data) return res.data;
+          }
+        } catch (e) {}
+        try {
+          if ('BarcodeDetector' in window) {
+            const det = new BarcodeDetector({ formats: ['qr_code'] });
+            const codes = await det.detect(canvas);
+            if (codes && codes[0] && codes[0].rawValue) return codes[0].rawValue;
+          }
+        } catch (e) {}
+        return '';
+      }
+
+      async function decodeQrFromFile(file) {
+        return new Promise((resolve) => {
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = async () => {
+            try {
+              const maxDim = 900;
+              const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+              const w = Math.max(1, Math.round(img.width * scale));
+              const h = Math.max(1, Math.round(img.height * scale));
+              const c = document.createElement('canvas');
+              c.width = w; c.height = h;
+              const ctx = c.getContext('2d', { willReadFrequently: true });
+              ctx.drawImage(img, 0, 0, w, h);
+              const val = await decodeQrFromCanvas(c);
+              URL.revokeObjectURL(url);
+              resolve(val || '');
+            } catch (e) {
+              URL.revokeObjectURL(url);
+              resolve('');
+            }
+          };
+          img.onerror = () => { URL.revokeObjectURL(url); resolve(''); };
+          img.src = url;
+        });
+      }
+
+      async function startQrScanner() {
+        stopQrScanner();
+        const vid = document.getElementById('qr-scan-video');
+        const statusEl = document.getElementById('qr-scan-status');
+        if (!vid) return;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          if (statusEl) statusEl.textContent = 'Camera unavailable here — tap Upload QR Photo below.';
+          return;
+        }
+        try {
+          _qrScanStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+          });
+          vid.srcObject = _qrScanStream;
+          await vid.play();
+          if (statusEl) statusEl.textContent = 'Align the QR code inside the gold frame';
+          const c = document.createElement('canvas');
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          _qrScanTimer = setInterval(async () => {
+            if (_qrScanBusy || ui.modal !== 'qrScanner' || !vid.videoWidth || !vid.videoHeight) return;
+            _qrScanBusy = true;
+            try {
+              const scale = Math.min(1, 640 / Math.max(vid.videoWidth, vid.videoHeight));
+              c.width = Math.round(vid.videoWidth * scale);
+              c.height = Math.round(vid.videoHeight * scale);
+              ctx.drawImage(vid, 0, 0, c.width, c.height);
+              const raw = await decodeQrFromCanvas(c);
+              if (raw) {
+                const fc = extractFriendCodeFromQr(raw);
+                if (fc) {
+                  stopQrScanner();
+                  ui.modal = null;
+                  renderModal();
+                  sendFriendRequest(fc);
+                  return;
+                }
+              }
+            } catch (e) {} finally {
+              _qrScanBusy = false;
+            }
+          }, 160);
+        } catch (err) {
+          if (statusEl) statusEl.textContent = 'Camera permission denied — tap Upload QR Photo below.';
+        }
+      }
     })();
   </script>
 </body>
