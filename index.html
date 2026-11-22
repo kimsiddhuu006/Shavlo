@@ -49,10 +49,11 @@
       letter-spacing: -0.03em;
     }
     html, body {
+      position: fixed;
+      inset: 0;
       width: 100%;
       max-width: 100vw;
       height: 100%;
-      height: 100dvh;
       font-size: 16px;
       margin: 0;
       padding: 0;
@@ -602,18 +603,20 @@
             const data = new TextEncoder().encode('samvaad-vault-v4:' + normalized);
             const buf = await window.crypto.subtle.digest('SHA-256', data);
             const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+            const code9 = String((parseInt(hex.slice(0, 12), 16) % 900000000) + 100000000);
             return {
               vaultId: hex.slice(0, 16),
-              friendCode: hex.slice(0, 32)
+              friendCode: code9
             };
           }
         } catch (e) { /* fallback */ }
         const h = syncHash(normalized);
         const h2 = syncHash(normalized + ':shavlo-fc-2');
         const hex32 = (h + h2 + h).replace(/[^A-F0-9]/g, 'A').slice(0, 32);
+        const code9Fb = String((parseInt(hex32.slice(0, 12), 16) % 900000000) + 100000000);
         return {
           vaultId: h,
-          friendCode: hex32
+          friendCode: code9Fb
         };
       }
 
@@ -646,7 +649,7 @@
           return `<span title="Sent" class="${onDarkBubble ? 'text-white/75' : 'text-zinc-400'}">${icon('checkSingle', 'w-3.5 h-3.5')}</span>`;
         }
         if (showBlue) {
-          return `<span title="Read" class="${onDarkBubble ? 'text-[#5CE1FF]' : 'text-[#0095FF]'}">${icon('checkDouble', 'w-3.5 h-3.5')}</span>`;
+          return `<span title="Read" class="text-[#C6A76D]">${icon('checkDouble', 'w-3.5 h-3.5')}</span>`;
         }
         return `<span title="Delivered" class="${onDarkBubble ? 'text-white/80' : 'text-zinc-400'}">${icon('checkDouble', 'w-3.5 h-3.5')}</span>`;
       }
@@ -683,8 +686,15 @@
         return `<span class="${sizeCls} rounded-full ${fallbackCls} title-display font-bold flex items-center justify-center shrink-0 ring-2 ring-white/85 dark:ring-white/20 shadow-[0_4px_14px_-2px_rgba(0,0,0,0.16)]">${escapeHtml(initial)}</span>`;
       }
 
+      function isLikelyImageFile(file) {
+        if (!file) return false;
+        if (file.type && file.type.startsWith('image/')) return true;
+        if (!file.type) return true;
+        return /\.(jpe?g|png|webp|gif|heic|heif|bmp|avif)$/i.test(file.name || '');
+      }
+
       function processProfilePhotoFile(file, onDone) {
-        if (!file || !file.type.startsWith('image/')) {
+        if (!isLikelyImageFile(file)) {
           showToast('Please select an image file');
           return;
         }
@@ -707,13 +717,15 @@
               onDone(reader.result);
             }
           };
+          img.onerror = () => { if (reader.result) onDone(reader.result); else showToast("Could not load photo"); };
           img.src = reader.result;
         };
+        reader.onerror = () => showToast("Could not read photo file");
         reader.readAsDataURL(file);
       }
 
-            function processChatMediaFile(file, onDone) {
-        if (!file || !file.type.startsWith('image/')) {
+            function processChatMediaFile(file, onDone, targetMaxEdge) {
+        if (!isLikelyImageFile(file)) {
           showToast('Please select an image file');
           return;
         }
@@ -722,7 +734,7 @@
           const img = new Image();
           img.onload = () => {
             try {
-              const maxEdge = 480;
+              const maxEdge = targetMaxEdge || 480;
               let w = img.width || maxEdge;
               let h = img.height || maxEdge;
               if (w > maxEdge || h > maxEdge) {
@@ -734,13 +746,15 @@
               canvas.height = Math.max(1, h);
               const ctx = canvas.getContext('2d');
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              onDone(canvas.toDataURL('image/jpeg', 0.84));
+              onDone(canvas.toDataURL('image/jpeg', (targetMaxEdge && targetMaxEdge >= 720) ? 0.86 : 0.84));
             } catch (err) {
               onDone(reader.result);
             }
           };
+          img.onerror = () => { if (reader.result) onDone(reader.result); else showToast("Could not load photo"); };
           img.src = reader.result;
         };
+        reader.onerror = () => showToast("Could not read photo file");
         reader.readAsDataURL(file);
       }
 
@@ -1042,16 +1056,16 @@
       let supaStatus = 'local'; // 'local' | 'connected' | 'realtime' | 'error'
       let supaLastError = '';
 
-      const SUPA_SCHEMA_SQL = "-- shavlo v1.4.0.1 Production Supabase SQL (Indexes + Replica Identity + Realtime)\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\n-- Complete indexes matching every v1.4.0.1 delta & scoped query (zero full-table scans)\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\n\n-- Disable RLS for direct client access\nalter table shavlo_users disable row level security;\nalter table shavlo_requests disable row level security;\nalter table shavlo_friendships disable row level security;\nalter table shavlo_groups disable row level security;\nalter table shavlo_messages disable row level security;\nalter table shavlo_statuses disable row level security;\nalter table shavlo_calls disable row level security;\n\n-- Ensure Realtime DELETE & UPDATE payloads carry full row identifiers (for Mist/Burn sync)\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\n-- Enable instant Supabase Realtime push across all tables\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\nexception when duplicate_object then\n  null;\nend $$;\n";
+      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.0 Production Supabase Schema (Storage + Read Receipts + Push Subs + Indexes + Realtime)\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public)\nvalues ('shavlo-media', 'shavlo-media', true)\non conflict (id) do update set public = true;\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\nexception when duplicate_object then\n  null;\nend $$;\n";
 
       const SUPA_DEFAULT_URL = 'https://vgtxcwltweprtuhgnabl.supabase.co';
       const SUPA_DEFAULT_KEY = 'sb_publishable__twtq_01qxArecbTMAdPXQ_LzSfaI1V';
 
       function getSupaCfg() {
         try {
+          if (sessionStorage.getItem('shavlo_force_local_v1') === '1') return null;
           const raw = localStorage.getItem(SUPA_CFG_KEY);
-          if (raw !== null) {
-            if (!raw) return null;
+          if (raw) {
             const c = JSON.parse(raw);
             if (c && c.url && c.key && /^https:\/\/[a-zA-Z0-9.-]+\.supabase\.co$/.test(c.url)) return c;
           }
@@ -1066,7 +1080,7 @@
         cleanUrl = cleanUrl.replace(/(\.supabase\.co)\/.*$/i, '');
         const cleanKey = String(key || '').trim();
         if (!cleanUrl || !cleanKey) {
-          try { localStorage.setItem(SUPA_CFG_KEY, ''); } catch (e) {}
+          try { sessionStorage.setItem('shavlo_force_local_v1', '1'); localStorage.removeItem(SUPA_CFG_KEY); } catch (e) {}
           stopSupaPolling();
           supaStatus = 'local';
           supaLastError = '';
@@ -1077,7 +1091,7 @@
           supaStatus = 'error';
           return false;
         }
-        try { localStorage.setItem(SUPA_CFG_KEY, JSON.stringify({ url: cleanUrl, key: cleanKey })); } catch (e) {}
+        try { sessionStorage.removeItem('shavlo_force_local_v1'); localStorage.setItem(SUPA_CFG_KEY, JSON.stringify({ url: cleanUrl, key: cleanKey })); } catch (e) {}
         return true;
       }
 
@@ -1322,7 +1336,7 @@
         offlineGraceTimers[key] = setTimeout(() => {
           if (ui.offlineGraceUntil[key] && Date.now() >= ui.offlineGraceUntil[key]) {
             delete ui.offlineGraceUntil[key];
-            render();
+            safeBackgroundRender();
           }
         }, 5050);
       }
@@ -1350,7 +1364,7 @@
       }
       setInterval(() => { if (activeVaultId && state && !document.hidden) syncOwnPresence(); }, 8000);
       window.addEventListener('beforeunload', () => { syncOwnPresence(true); });
-      document.addEventListener('visibilitychange', () => { if (activeVaultId && state) syncOwnPresence(document.hidden); });
+      document.addEventListener('visibilitychange', () => { if (activeVaultId && state) { syncOwnPresence(document.hidden); if (!document.hidden && getSupaCfg()) syncWithSupabase(); } });
 
       const lastRingStateByChat = {};
       function triggerRingHaptic(chatId, nextState) {
@@ -1365,6 +1379,89 @@
           else if (nextState === 'inchat') navigator.vibrate([12, 35, 16]);
           else if (nextState === 'online') navigator.vibrate(10);
           else navigator.vibrate(8);
+        } catch (e) {}
+      }
+
+      let incomingRingTimer = null;
+      let notifiedMsgIds = new Set();
+      let notifiedCallRooms = new Set();
+
+      function ensureNotificationPermission() {
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            Notification.requestPermission().catch(() => {});
+          }
+        } catch (e) {}
+      }
+
+      function stopIncomingRingtone() {
+        clearInterval(incomingRingTimer);
+        incomingRingTimer = null;
+      }
+
+      function startIncomingRingtone() {
+        if (incomingRingTimer) return;
+        const ringOnce = () => {
+          playSubtleTone('ping');
+          triggerHaptic([160, 100, 160]);
+        };
+        ringOnce();
+        incomingRingTimer = setInterval(ringOnce, 2200);
+      }
+
+      function notifyIncomingMessage(msg, senderName, roomId) {
+        if (!msg || !msg.id || notifiedMsgIds.has(msg.id)) return;
+        if (msg.authorId === activeVaultId) return;
+        notifiedMsgIds.add(msg.id);
+        if (notifiedMsgIds.size > 400) {
+          const first = notifiedMsgIds.values().next().value;
+          notifiedMsgIds.delete(first);
+        }
+        const chats = getMergedChats();
+        const chat = chats.find(c => c.id === roomId);
+        if (chat && isChatMuted(chat)) return;
+        const isViewingThisChat = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === roomId && (window.innerWidth >= 768 || state.mobileView === 'chat'));
+        if (isViewingThisChat) {
+          playSubtleTone('ping');
+          triggerHaptic(10);
+          return;
+        }
+        const title = senderName || (chat ? chat.name : 'New Message');
+        const body = msg.type === 'image' ? 'Sent a photo' : (msg.type === 'video' ? 'Sent a video' : (msg.type === 'voice' ? 'Sent a voice note' : (msg.type === 'document' ? ('Sent ' + (msg.fileName || 'a document')) : (msg.text || 'New message'))));
+        playSubtleTone('ping');
+        triggerHaptic([14, 35, 14]);
+        showToast(title + ': ' + body.slice(0, 42));
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            const n = new Notification(title, { body, tag: 'shavlo-msg-' + roomId });
+            n.onclick = () => {
+              try { window.focus(); } catch (_) {}
+              if (state && roomId) {
+                state.activeNav = 'messages';
+                state.selectedChatId = roomId;
+                state.mobileView = 'chat';
+                render();
+                scrollToBottom();
+              }
+            };
+          }
+        } catch (e) {}
+      }
+
+      function notifyIncomingCall(call) {
+        if (!call || !call.roomId) return;
+        startIncomingRingtone();
+        if (notifiedCallRooms.has(call.roomId)) return;
+        notifiedCallRooms.add(call.roomId);
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            const n = new Notification('Incoming ' + (call.type === 'video' ? 'Video' : 'Voice') + ' Call', {
+              body: (call.peerName || 'Someone') + ' is calling you on shavlo',
+              tag: 'shavlo-call-' + call.roomId,
+              requireInteraction: true
+            });
+            n.onclick = () => { try { window.focus(); } catch (_) {} };
+          }
         } catch (e) {}
       }
 
@@ -1407,15 +1504,225 @@
         } catch (e) {}
       }
 
+      let activeVoiceRecorder = null;
+      let activeVoiceStream = null;
+      let activeVoiceChunks = [];
+      let activeVoicePlayer = null;
+      let walkieRecorder = null;
+      let walkieRecStream = null;
+      let walkieChunks = [];
+
+      function pickSupportedAudioMime() {
+        if (typeof MediaRecorder === 'undefined') return '';
+        const cands = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+        for (const m of cands) {
+          try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (_) {}
+        }
+        return '';
+      }
+
+      async function startRealVoiceRecorder() {
+        stopRealVoiceRecorder(true);
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') return;
+        try {
+          activeVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mime = pickSupportedAudioMime();
+          activeVoiceChunks = [];
+          activeVoiceRecorder = mime ? new MediaRecorder(activeVoiceStream, { mimeType: mime }) : new MediaRecorder(activeVoiceStream);
+          activeVoiceRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) activeVoiceChunks.push(ev.data); };
+          activeVoiceRecorder.start(250);
+        } catch (e) {
+          activeVoiceRecorder = null;
+        }
+      }
+
+      function stopRealVoiceRecorder(discard) {
+        return new Promise((resolve) => {
+          const rec = activeVoiceRecorder;
+          const stream = activeVoiceStream;
+          activeVoiceRecorder = null;
+          activeVoiceStream = null;
+          const cleanupTracks = () => {
+            if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} }
+          };
+          if (!rec || rec.state === 'inactive') {
+            cleanupTracks();
+            resolve(null);
+            return;
+          }
+          rec.onstop = () => {
+            cleanupTracks();
+            if (discard || !activeVoiceChunks.length) { activeVoiceChunks = []; resolve(null); return; }
+            const blob = new Blob(activeVoiceChunks, { type: rec.mimeType || 'audio/mp4' });
+            activeVoiceChunks = [];
+            resolve(blob);
+          };
+          try { rec.stop(); } catch (_) { cleanupTracks(); resolve(null); }
+        });
+      }
+
+      async function startWalkieCapture() {
+        if (walkieRecorder) return;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') return;
+        try {
+          walkieRecStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mime = pickSupportedAudioMime();
+          walkieChunks = [];
+          walkieRecorder = mime ? new MediaRecorder(walkieRecStream, { mimeType: mime }) : new MediaRecorder(walkieRecStream);
+          walkieRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) walkieChunks.push(ev.data); };
+          walkieRecorder.start(150);
+        } catch (e) {
+          walkieRecorder = null;
+        }
+      }
+
+      function stopAndBroadcastWalkie(roomId) {
+        const rec = walkieRecorder;
+        const stream = walkieRecStream;
+        walkieRecorder = null;
+        walkieRecStream = null;
+        const cleanup = () => { if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} } };
+        if (!rec || rec.state === 'inactive') { cleanup(); return; }
+        rec.onstop = () => {
+          cleanup();
+          if (!walkieChunks.length || !roomId) { walkieChunks = []; return; }
+          const blob = new Blob(walkieChunks, { type: rec.mimeType || 'audio/mp4' });
+          walkieChunks = [];
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (typeof reader.result !== 'string') return;
+            if (supaRealtimeChan && activeVaultId) {
+              try {
+                supaRealtimeChan.send({
+                  type: 'broadcast',
+                  event: 'walkie_audio',
+                  payload: { roomId, fromId: activeVaultId, fromName: state ? state.userProfile.name : '', audioData: reader.result }
+                });
+              } catch (_) {}
+            }
+            if (liveChannel && activeVaultId) {
+              try { liveChannel.postMessage({ type: 'walkie_audio', roomId, fromId: activeVaultId, audioData: reader.result }); } catch (_) {}
+            }
+          };
+          reader.readAsDataURL(blob);
+        };
+        try { rec.stop(); } catch (_) { cleanup(); }
+      }
+
+      function isNearChatBottom() {
+        const feed = document.getElementById('message-feed');
+        if (!feed) return true;
+        return (feed.scrollHeight - feed.scrollTop - feed.clientHeight) < 160;
+      }
+
+      function setTurnConfig(urls, username, credential) {
+        if (!urls) { try { localStorage.removeItem('shavlo_turn_cfg_v1'); } catch (e) {} return; }
+        try { localStorage.setItem('shavlo_turn_cfg_v1', JSON.stringify({ urls, username: username || '', credential: credential || '' })); } catch (e) {}
+      }
+
+      async function subscribeToWebPush(vapidPublicKey) {
+        if (!vapidPublicKey || !('serviceWorker' in navigator) || !('PushManager' in window) || !activeVaultId) return false;
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const pad = '='.repeat((4 - vapidPublicKey.length % 4) % 4);
+          const b64 = (vapidPublicKey + pad).replace(/-/g, '+').replace(/_/g, '/');
+          const raw = atob(b64);
+          const keyArr = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) keyArr[i] = raw.charCodeAt(i);
+          const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyArr });
+          supaWriteReliable('shavlo_push_subs', 'POST', '', { vault_id: activeVaultId, subscription: sub.toJSON(), updated_at: Date.now() });
+          return true;
+        } catch (e) { return false; }
+      }
+
+      function getIceServers() {
+        const servers = [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' }
+        ];
+        try {
+          const rawTurn = localStorage.getItem('shavlo_turn_cfg_v1');
+          if (rawTurn) {
+            const t = JSON.parse(rawTurn);
+            if (t && t.urls) servers.push({ urls: t.urls, username: t.username || '', credential: t.credential || '' });
+          }
+        } catch (e) {}
+        return servers;
+      }
+
+      async function uploadMediaToSupabaseStorage(dataUrlOrFile, folder, extFallback) {
+        const cfg = getSupaCfg();
+        if (!cfg || !dataUrlOrFile) return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
+        try {
+          let blob = null;
+          let ext = extFallback || 'jpg';
+          if (typeof dataUrlOrFile === 'string') {
+            if (!dataUrlOrFile.startsWith('data:')) return dataUrlOrFile;
+            const res = await fetch(dataUrlOrFile);
+            blob = await res.blob();
+            if (blob.type && blob.type.includes('/')) ext = blob.type.split('/')[1].split(';')[0] || ext;
+          } else if (dataUrlOrFile instanceof Blob) {
+            blob = dataUrlOrFile;
+            if (dataUrlOrFile.name && dataUrlOrFile.name.includes('.')) ext = dataUrlOrFile.name.split('.').pop().toLowerCase();
+          }
+          if (!blob) return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
+          const safeFolder = String(folder || 'chat').replace(/[^a-z0-9_-]/gi, '');
+          const objPath = `${safeFolder}/${activeVaultId || 'anon'}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+          const headers = { 'apikey': cfg.key, 'Content-Type': blob.type || 'application/octet-stream', 'x-upsert': 'true' };
+          if (cfg.key && cfg.key.startsWith('eyJ')) headers['Authorization'] = 'Bearer ' + cfg.key;
+          const upRes = await fetch(`${cfg.url}/storage/v1/object/shavlo-media/${objPath}`, {
+            method: 'POST',
+            headers,
+            body: blob
+          });
+          if (!upRes.ok) throw new Error('Storage HTTP ' + upRes.status);
+          return `${cfg.url}/storage/v1/object/public/shavlo-media/${objPath}`;
+        } catch (e) {
+          return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
+        }
+      }
+
+      let roomOlderLoading = {};
+      let roomHasNoMoreOlder = {};
+      function markRoomRead(roomId) {
+        if (!roomId || !activeVaultId || !state) return;
+        const net = getNetwork();
+        net.readReceipts = net.readReceipts || {};
+        net.readReceipts[roomId] = net.readReceipts[roomId] || {};
+        net.readReceipts[roomId][activeVaultId] = Date.now();
+        saveNetwork(net, 'read_receipt');
+        supaWriteReliable('shavlo_read_receipts', 'POST', '', {
+          room_id: roomId, user_id: activeVaultId, last_read_at: net.readReceipts[roomId][activeVaultId]
+        });
+      }
+
+      async function loadOlderMessages(roomId) {
+        if (!roomId || !getSupaCfg() || roomOlderLoading[roomId]) return;
+        roomOlderLoading[roomId] = true;
+        render();
+        try {
+          const net = getNetwork();
+          const cur = Array.isArray(net.peerChats[roomId]) ? net.peerChats[roomId] : [];
+          const oldestTs = cur.length ? Math.min(...cur.map(m => Number(m.createdAt || Date.now()))) : Date.now();
+          const rows = await supaFetch('shavlo_messages', 'GET', `?room_id=eq.${encodeURIComponent(roomId)}&created_at=lt.${oldestTs}&order=created_at.desc&limit=50`);
+          if (!Array.isArray(rows) || rows.length < 50) roomHasNoMoreOlder[roomId] = true;
+          if (Array.isArray(rows) && rows.length > 0) {
+            const older = rows.reverse().map(r => Object.assign({}, (typeof r.payload === 'string' ? JSON.parse(r.payload) : (r.payload || {})), { id: r.id, authorId: r.author_id, authorName: r.author_name || '', createdAt: Number(r.created_at || Date.now()) }));
+            const byId = new Map(older.map(m => [m.id, m]));
+            cur.forEach(m => byId.set(m.id, m));
+            net.peerChats[roomId] = Array.from(byId.values());
+            saveNetwork(net, 'older_msgs');
+          }
+        } catch (e) {}
+        roomOlderLoading[roomId] = false;
+        render();
+      }
+
       async function ensureWebRtcPeer(roomId, peerId, callType) {
         if (rtcPc) return rtcPc;
         if (typeof RTCPeerConnection === 'undefined') return null;
-        const pc = new RTCPeerConnection({
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
-          ]
-        });
+        const pc = new RTCPeerConnection({ iceServers: getIceServers() });
         rtcPc = pc;
         remoteMediaStream = new MediaStream();
         pc.ontrack = (ev) => {
@@ -1569,19 +1876,21 @@
           supaSyncTickCount += 1;
           const fetchUsers = forceFull || supaSyncTickCount === 1 || (supaSyncTickCount % 4 === 0);
           const fetchStatuses = forceFull || supaSyncTickCount === 1 || (supaSyncTickCount % 2 === 0);
+          const sinceTs = Math.max(0, lastSupaMsgCreatedAt - 15000);
           const msgQuery = (!forceFull && lastSupaMsgCreatedAt > 0)
-            ? `?select=*&created_at=gt.${lastSupaMsgCreatedAt}&order=created_at.asc&limit=100`
-            : '?select=*&order=created_at.desc&limit=120';
+            ? `?select=*&created_at=gt.${sinceTs}&order=created_at.asc&limit=150`
+            : '?select=*&order=created_at.desc&limit=150';
 
           const vidEnc = encodeURIComponent(activeVaultId);
-          const [users, reqs, friends, groups, msgsRaw, statuses, calls] = await Promise.all([
+          const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts] = await Promise.all([
             fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=*') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=*&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=*&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
             supaFetch('shavlo_groups', 'GET', '?select=*'),
             supaFetch('shavlo_messages', 'GET', msgQuery),
             fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=*&expires_at=gt.${Date.now()}`) : Promise.resolve(null),
-            supaFetch('shavlo_calls', 'GET', `?select=*&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => [])
+            supaFetch('shavlo_calls', 'GET', `?select=*&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
+            supaFetch('shavlo_read_receipts', 'GET', '?select=*').catch(() => [])
           ]);
           const msgs = (!forceFull && lastSupaMsgCreatedAt > 0) ? (msgsRaw || []) : (msgsRaw || []).slice().reverse();
           if (msgs.length > 0) {
@@ -1640,6 +1949,11 @@
             };
           });
 
+          net.readReceipts = net.readReceipts || {};
+          (readReceipts || []).forEach(rr => {
+            net.readReceipts[rr.room_id] = net.readReceipts[rr.room_id] || {};
+            net.readReceipts[rr.room_id][rr.user_id] = Number(rr.last_read_at || 0);
+          });
           saveNetwork(net, 'cloud_sync');
           if (supaStatus !== 'realtime') supaStatus = 'connected';
           supaLastError = '';
@@ -1684,13 +1998,19 @@
                     const row = change.new;
                     const net = getNetwork();
                     const list = Array.isArray(net.peerChats[row.room_id]) ? net.peerChats[row.room_id] : [];
-                    const mapped = Object.assign({}, row.payload || {}, { id: row.id, authorId: row.author_id, authorName: row.author_name || '' });
+                    const rawPl = (typeof row.payload === "string") ? JSON.parse(row.payload) : (row.payload || {});
+                    const mapped = Object.assign({}, rawPl, { id: row.id, authorId: row.author_id, authorName: row.author_name || "", createdAt: Number(row.created_at || rawPl.createdAt || Date.now()) });
                     const idx = list.findIndex(m => m.id === row.id);
                     if (idx >= 0) list[idx] = Object.assign({}, list[idx], mapped);
                     else list.push(mapped);
                     net.peerChats[row.room_id] = list;
                     if (Number(row.created_at || 0) > lastSupaMsgCreatedAt) lastSupaMsgCreatedAt = Number(row.created_at || 0);
                     saveNetwork(net, 'realtime_msg');
+                    if (change.eventType === 'INSERT' && mapped.authorId !== activeVaultId) {
+                      notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
+                      const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === row.room_id && (window.innerWidth >= 768 || state.mobileView === 'chat'));
+                      if (isOpenNow) markRoomRead(row.room_id);
+                    }
                     syncFromNetwork();
                     return;
                   }
@@ -1712,8 +2032,9 @@
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_requests' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_friendships' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_groups' }, () => scheduleSupaSync(250))
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_calls' }, () => scheduleSupaSync(250))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_calls' }, () => scheduleSupaSync(80))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_statuses' }, () => scheduleSupaSync(250))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_read_receipts' }, () => scheduleSupaSync(250))
               .on('broadcast', { event: 'ring_ping' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId) triggerRingPing(payload.roomId, payload.fromName, true);
               })
@@ -1722,6 +2043,22 @@
               })
               .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
                 handleWebRtcSignal(payload);
+              })
+              .on('broadcast', { event: 'walkie_audio' }, ({ payload }) => {
+                if (payload && payload.fromId !== activeVaultId && payload.audioData) {
+                  playSubtleTone('walkie_on');
+                  ui.walkieActive = true;
+                  ui.walkieChatId = payload.roomId;
+                  ui.walkiePeerSpeaking = true;
+                  safeBackgroundRender();
+                  try {
+                    const wa = new Audio(payload.audioData);
+                    wa.onended = () => { ui.walkiePeerSpeaking = false; safeBackgroundRender(); };
+                    wa.play().catch(() => {});
+                  } catch (_) {}
+                  clearTimeout(walkieDemoTimer);
+                  walkieDemoTimer = setTimeout(() => { ui.walkiePeerSpeaking = false; safeBackgroundRender(); }, 4500);
+                }
               })
               .on('presence', { event: 'sync' }, () => {
                 try {
@@ -1974,6 +2311,11 @@
               speaker: ui.activeCall ? ui.activeCall.speaker : false,
               camOn: liveCall.type === 'video'
             };
+            if (status === 'incoming') {
+              notifyIncomingCall(ui.activeCall);
+            } else {
+              stopIncomingRingtone();
+            }
             if (status === 'connected') {
               startCallTimer();
               if (liveCall.callerId === activeVaultId && !rtcPc) {
@@ -1982,6 +2324,7 @@
             }
           }
         } else if (ui.activeCall && ui.activeCall.isPeer) {
+          stopIncomingRingtone();
           closeWebRtc();
           stopLocalCamera();
           clearInterval(callTimer);
@@ -2011,12 +2354,14 @@
             const filteredMsgs = ui.inChatSearchQuery
               ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase()))
               : activeMessages;
+            const wasNear = isNearChatBottom();
             feed.innerHTML = '<div class="flex justify-center pb-2.5"><span class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] font-semibold text-muted tracking-tight">Today</span></div>'
               + filteredMsgs.map(m => renderBubble(chat, m)).join('');
-            scrollToBottom();
+            if (wasNear) scrollToBottom();
             return;
           }
         }
+        const wasNearBeforeRender = isNearChatBottom();
         const savedId = isTyping ? ae.id : '';
         const savedVal = isTyping ? ae.value : '';
         const savedSelStart = isTyping ? ae.selectionStart : null;
@@ -2030,7 +2375,7 @@
             try { if (savedSelStart !== null) restored.setSelectionRange(savedSelStart, savedSelEnd); } catch (_) {}
           }
         }
-        if (state.activeNav === 'messages') scrollToBottom();
+        if (state.activeNav === 'messages' && wasNearBeforeRender) scrollToBottom();
       }
 
       let peerTypingTimers = {};
@@ -2073,7 +2418,7 @@
               delete ui.onlineVaultIds[ev.data.fromId];
               delete ui.peerActiveRooms[ev.data.fromId];
             }
-            render();
+            safeBackgroundRender();
             return;
           }
           invalidateNetworkCache();
@@ -2422,14 +2767,22 @@
           const otherId = f.users.find(id => id !== activeVaultId);
           const other = net.directory[otherId] || { name: 'Friend', friendCode: 'SMV-PEER', upiId: 'friend@upi', avatarText: 'F' };
           const roomId = makeRoomId(activeVaultId, otherId);
+          const peerReadAt = (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][otherId]) || 0;
           const rawMsgs = (net.peerChats[roomId] || [])
             .filter(m => !m.expiresAt || m.expiresAt > nowMs)
-            .map(m => ({
-              ...m,
-              text: m.text || '',
-              sender: m.authorId === activeVaultId ? 'me' : 'other',
-              senderName: m.authorId === activeVaultId ? 'You' : other.name
-            }));
+            .map(m => {
+              const isMine = m.authorId === activeVaultId;
+              const liveStatus = isMine
+                ? ((peerReadAt > 0 && Number(m.createdAt || 0) <= peerReadAt) ? 'read' : (m.status || 'delivered'))
+                : m.status;
+              return {
+                ...m,
+                status: liveStatus,
+                text: m.text || '',
+                sender: isMine ? 'me' : 'other',
+                senderName: isMine ? 'You' : other.name
+              };
+            });
           const lastMsg = rawMsgs[rawMsgs.length - 1];
           return {
             id: roomId,
@@ -2445,7 +2798,10 @@
             pinned: true,
             muted: !!(state.security && state.security.mutedChatIds && state.security.mutedChatIds[roomId]),
             disappearing: false,
-            unread: 0,
+            unread: (() => {
+              const myReadAt = (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][activeVaultId]) || 0;
+              return rawMsgs.filter(m => m.sender === 'other' && Number(m.createdAt || 0) > myReadAt).length;
+            })(),
             upiId: other.upiId || 'friend@upi',
             phone: other.friendCode,
             lastTime: lastMsg ? lastMsg.time : 'Now',
@@ -2698,7 +3054,7 @@
       async function sendFriendRequestByCode(rawCode) {
         const code = String(rawCode || '').trim().toUpperCase();
         if (!code) { showToast('Enter a unique code'); return; }
-        if (!/^([A-F0-9]{16,64}|SMV-[A-Z0-9]{4}-[A-Z0-9]{4})$/.test(code)) { showToast('Enter a valid friend code'); return; }
+        if (!/^(\d{6,9}|[A-F0-9]{16,64}|SMV-[A-Z0-9]{4}-[A-Z0-9]{4})$/.test(code)) { showToast('Enter a valid friend code'); return; }
         if (code === state.userProfile.friendCode) { showToast('That is your own code'); return; }
         const net = getNetwork();
         let target = Object.values(net.directory).find(u => u.friendCode === code);
@@ -2837,7 +3193,7 @@
         const cleanCode = String(newCode || '').trim().toUpperCase();
         const isOutgoing = req.fromId === activeVaultId;
         if (isOutgoing) {
-          if (cleanCode && !/^([A-F0-9]{16,64}|SMV-[A-Z0-9]{4}-[A-Z0-9]{4})$/.test(cleanCode)) {
+          if (cleanCode && !/^(\d{6,9}|[A-F0-9]{16,64}|SMV-[A-Z0-9]{4}-[A-Z0-9]{4})$/.test(cleanCode)) {
             showToast('Enter a valid friend code');
             return;
           }
@@ -3049,6 +3405,7 @@
       }
 
       function endActiveCall() {
+        stopIncomingRingtone();
         closeWebRtc();
         stopLocalCamera();
         clearInterval(callTimer);
@@ -3402,7 +3759,7 @@
           const micBtn = document.getElementById('chat-mic-btn');
           if (sendBtn) sendBtn.classList.add('hidden');
           if (micBtn) micBtn.classList.remove('hidden');
-          scrollToBottom(true);
+          scrollToBottom(false);
         } else {
           render();
           scrollToBottom();
@@ -4548,12 +4905,7 @@
                       <button data-action="select-chat" data-chat-item="${c.id}" data-id="${c.id}" style="touch-action: pan-y; transform: translateX(${isSwiped ? -170 : 0}px); transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);" class="relative z-10 w-full text-left px-3.5 py-3.5 rounded-2xl bg-[#FAFAFC] dark:bg-[#0B0B0D] flex items-center gap-4 select-none ${isSel ? 'md:bg-brand-50 md:dark:bg-brand-600/15' : ''} hover:bg-[#F3F3F7] dark:hover:bg-[#141418]">
                         <div class="relative shrink-0">
                           ${(ui.ringPingChats && ui.ringPingChats[c.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
-                          ${(() => {
-                            const st = getChatActiveStatus(c);
-                            const seen = st && (st.seen || (Array.isArray(st.seenBy) && st.seenBy.includes(activeVaultId)));
-                            const ringCls = st ? (seen ? 'status-ring-seen rounded-full' : 'status-ring-active rounded-full') : '';
-                            return `<div class="${ringCls}">${st ? '<div class="rounded-full border-2 border-white dark:border-[#0B0B0D]">' : ''}${renderAvatar(c.avatarText, c.avatarUrl, 'w-14 h-14 text-[17px] font-bold', c.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}${st ? '</div>' : ''}</div>`;
-                          })()}
+                          ${renderAvatar(c.avatarText, c.avatarUrl, 'w-14 h-14 text-[17px] font-bold', c.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
                         </div>
                         <div class="flex-1 min-w-0">
                           <div class="flex items-center justify-between gap-2">
@@ -4600,12 +4952,7 @@
                   ${icon('back', 'w-5 h-5')}
                 </button>
                 <button data-action="open-modal" data-modal="contactMenu" title="Contact info, search &amp; options" class="flex items-center gap-3 min-w-0 text-left rounded-full pr-2 py-0.5 hover:opacity-80 transition">
-                  ${(() => {
-                    const st = !isPrivateMode ? getChatActiveStatus(chat) : null;
-                    const seen = st && (st.seen || (Array.isArray(st.seenBy) && st.seenBy.includes(activeVaultId)));
-                    const ringCls = isPrivateMode ? 'profile-dotted-ring' : (st ? (seen ? 'status-ring-seen rounded-full' : 'status-ring-active rounded-full') : '');
-                    return `<span class="relative inline-flex shrink-0 ${ringCls}">${st ? '<span class="rounded-full border-2 border-white dark:border-[#09090C]">' : ''}${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}${st ? '</span>' : ''}</span>`;
-                  })()}
+                  <span class="relative inline-flex shrink-0 ${isPrivateMode ? 'profile-dotted-ring' : ''}">${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}</span>
                   <div class="min-w-0">
                     <h2 class="title-display text-[20px] font-bold ${isPrivateMode ? 'text-white' : 'text-ink dark:text-white'} truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
                     ${isPrivateMode
@@ -4642,7 +4989,8 @@
                     <button type="button" data-action="exit-private-chat" class="mt-1 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11.5px] font-semibold text-white/90 transition">Exit Private</button>
                   </div>
                 ` : `
-                  <span class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] font-semibold text-muted tracking-tight">Today</span>
+${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `<button type="button" data-action="load-older-msgs" data-id="${chat.id}" class="mr-2 px-3 py-1 rounded-full bg-black/[0.06] dark:bg-white/[0.1] text-[11px] font-semibold text-ink dark:text-white hover:opacity-80 transition">${roomOlderLoading[chat.id] ? 'Loading...' : 'Load older'}</button>` : ''}
+                                    <span class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] font-semibold text-muted tracking-tight">Today</span>
                 `}
               </div>
               ${(ui.inChatSearchQuery ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase())) : activeMessages).map(m => renderBubble(chat, m)).join('')}
@@ -4773,8 +5121,8 @@
                   <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Hold &amp; swipe left for Walkie-Talkie" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] transition-transform duration-150 hover:scale-105 active:scale-95">
                     ${icon('mic', 'w-[20px] h-[20px]')}
                   </button>
-                  <button id="chat-send-btn" type="submit" title="Send" class="hidden w-12 h-12 rounded-full bg-ink dark:bg-white text-white dark:text-ink flex items-center justify-center shadow-md shrink-0 transition">
-                    ${icon('send', 'w-[19px] h-[19px]')}
+                  <button id="chat-send-btn" type="submit" title="Send" onmousedown="event.preventDefault()" class="hidden w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
+                    <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
                   </button>
                 </form>
               `}
@@ -4789,7 +5137,7 @@
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Polls</span>
                     </button>
-                    <button type="button" data-action="open-photo-picker" class="py-2 px-1.5 rounded-[18px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
+                    <input id="direct-gallery-input" type="file" accept="image/*,video/*" class="sr-only" /><button type="button" data-action="open-gallery-picker" class="py-2 px-1.5 rounded-[18px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
                       <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                       </span>
@@ -4807,7 +5155,7 @@
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Documents</span>
                     </button>
-                    <input id="chat-doc-input" type="file" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.zip,application/pdf,text/plain" class="hidden" />
+                    <input id="chat-doc-input" type="file" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.zip,application/pdf,text/plain" class="sr-only" />
                   </div>
                 </div>
               ` : ''}
@@ -5056,7 +5404,7 @@
           }
         } else if (msg.type === 'contact') {
           body = `
-            <div class="w-56 p-0.5 flex items-center gap-3">
+            ${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener noreferrer" class="w-56 p-0.5 flex items-center gap-3 hover:opacity-80 transition">` : '<div class="w-56 p-0.5 flex items-center gap-3">'}
               <div class="w-10 h-10 rounded-full ${isMe ? 'bg-white text-[#09090C]' : 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C]'} font-bold text-[14px] flex items-center justify-center shrink-0">${escapeHtml(getInitial(msg.contactName || 'C'))}</div>
               <div class="min-w-0 flex-1">
                 <div class="text-[10px] font-bold uppercase tracking-wider opacity-65">Contact</div>
@@ -5074,9 +5422,9 @@
               <div class="min-w-0 flex-1">
                 <div class="text-[10px] font-bold uppercase tracking-wider opacity-65">Document</div>
                 <div class="font-semibold text-[13.5px] truncate">${escapeHtml(msg.fileName || 'Document')}</div>
-                <div class="text-[11px] opacity-75 tabular-nums">${escapeHtml(msg.fileSize || 'File')}</div>
+                <div class="text-[11px] opacity-75 tabular-nums">${escapeHtml(msg.fileSize || 'File')}${msg.fileUrl ? ' • Tap to open' : ''}</div>
               </div>
-            </div>
+            ${msg.fileUrl ? '</a>' : '</div>'}
           `;
         } else if (msg.type === 'order') {
           body = `
@@ -5162,7 +5510,7 @@
                           <span class="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-ink dark:bg-white text-white dark:text-ink text-[11px] font-bold flex items-center justify-center shadow transition-all duration-300 group-hover:scale-110 group-hover:bg-[#C6A76D] group-hover:text-white">+</span>
                         </label>
                       `}
-                      <input id="profile-photo-input" type="file" accept="image/*" class="hidden" />
+                      <input id="profile-photo-input" type="file" accept="image/*" class="sr-only" />
                     </div>
                     <div>
                       <div class="title-display text-[22px] font-bold text-[#C6A76D] leading-tight tracking-[-0.02em]">${escapeHtml(state.userProfile.name)}</div>
@@ -6174,17 +6522,17 @@
                 <div class="flex items-center gap-1.5">
                   <label for="chat-gallery-file-input" class="px-3.5 py-1.5 rounded-full bg-black/[0.06] dark:bg-white/[0.1] text-[12.5px] font-semibold text-ink dark:text-white cursor-pointer hover:opacity-80 transition">
                     Browse
-                    <input id="chat-gallery-file-input" type="file" accept="image/*" class="hidden" />
+                    <input id="chat-gallery-file-input" type="file" accept="image/*,video/*" class="sr-only" />
                   </label>
                   <button type="button" data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
                 </div>
               </div>
               <div class="grid grid-cols-3 gap-2 max-h-[44dvh] overflow-y-auto thin-scroll rounded-2xl">
-                <label for="chat-photo-input" class="aspect-square rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex flex-col items-center justify-center gap-1.5 cursor-pointer hover:opacity-90 transition">
+                <button type="button" data-action="open-camera-capture" class="aspect-square rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex flex-col items-center justify-center gap-1.5 cursor-pointer hover:opacity-90 transition">
                   ${icon('camera', 'w-6 h-6')}
                   <span class="text-[12px] font-semibold tracking-[-0.01em]">Camera</span>
-                  <input id="chat-photo-input" type="file" accept="image/*" capture="environment" class="hidden" />
-                </label>
+                </button>
+                <input id="chat-photo-input" type="file" accept="image/*" capture="environment" class="sr-only" />
                 ${galleryItems.map((url, idx) => `
                   <button type="button" data-action="pick-gallery-photo" data-idx="${idx}" class="aspect-square rounded-2xl overflow-hidden bg-surface dark:bg-zinc-900 border border-black/[0.05] dark:border-white/10 hover:opacity-90 active:scale-95 transition">
                     <img src="${escapeHtml(url)}" alt="Gallery photo" class="w-full h-full object-cover" />
@@ -6296,7 +6644,7 @@
                 </div>
                 <label for="status-photo-input" class="px-3.5 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold cursor-pointer hover:bg-brand-50 transition">
                   ${ui.statusDraftPhoto ? 'Change photo' : '+ Add photo'}
-                  <input id="status-photo-input" type="file" accept="image/*" class="hidden" />
+                  <input id="status-photo-input" type="file" accept="image/*" class="sr-only" />
                 </label>
               </div>
               <div class="flex justify-end gap-2 pt-1">
@@ -6854,6 +7202,7 @@
 
       // Event Delegation
       document.addEventListener('click', (e) => {
+        if (state && activeVaultId) ensureNotificationPermission();
         const btn = e.target.closest('[data-action]');
         if (!btn) return;
         const action = btn.dataset.action;
@@ -6925,6 +7274,7 @@
             ui.unreadJumpTarget = null;
           }
           if (c) c.unread = 0;
+          if (c && c.isPeer) markRoomRead(c.id);
           markPeerRoomRead(btn.dataset.id);
           persistCurrentVault();
           render();
@@ -7286,7 +7636,7 @@
           ui.recordingVoice = true;
           ui.recordingPaused = false;
           ui.recordSeconds = 0;
-          triggerHaptic(12);
+          startRealVoiceRecorder();
           render();
           recordTimer = setInterval(() => {
             if (!ui.recordingPaused) {
@@ -7296,10 +7646,13 @@
           }, 1000);
         } else if (action === 'toggle-pause-voice') {
           ui.recordingPaused = !ui.recordingPaused;
-          triggerHaptic(10);
+          if (activeVoiceRecorder) {
+            try { if (ui.recordingPaused && activeVoiceRecorder.state === 'recording') activeVoiceRecorder.pause(); else if (!ui.recordingPaused && activeVoiceRecorder.state === 'paused') activeVoiceRecorder.resume(); } catch (_) {}
+          }
           render();
         } else if (action === 'cancel-voice') {
           clearInterval(recordTimer);
+          stopRealVoiceRecorder(true);
           ui.recordingVoice = false;
           ui.recordingPaused = false;
           render();
@@ -7309,11 +7662,15 @@
           ui.recordingVoice = false;
           ui.recordingPaused = false;
           const chat = getSelectedChat();
-          if (chat) {
-            pushMessageToChat(chat, { id: 'm_' + Date.now(), sender: 'me', senderName: 'You', type: 'voice', duration: `0:${String(secs).padStart(2, '0')}`, viewOnce: false, viewedOnce: false, time: nowTime(), status: 'read', reactions: [], starred: false });
+          render();
+          (async () => {
+            const blob = await stopRealVoiceRecorder(false);
+            if (!chat) return;
+            const audioUrl = blob ? await uploadMediaToSupabaseStorage(blob, 'voice', 'm4a') : '';
+            pushMessageToChat(chat, { id: 'm_' + Date.now(), sender: 'me', senderName: 'You', type: 'voice', duration: `0:${String(secs).padStart(2, '0')}`, audioUrl: audioUrl || '', viewOnce: false, viewedOnce: false, time: nowTime(), status: 'sent', reactions: [], starred: false });
             render();
             scrollToBottom();
-          }
+          })();
         } else if (action === 'stop-voice') {
           clearInterval(recordTimer);
           const secs = Math.max(1, ui.recordSeconds);
@@ -7333,6 +7690,14 @@
             render();
             scrollToBottom();
           }
+        } else if (action === 'load-older-msgs') {
+          loadOlderMessages(btn.dataset.id);
+        } else if (action === 'open-camera-capture') {
+          const cInp = document.getElementById('chat-photo-input');
+          if (cInp) cInp.click();
+        } else if (action === 'open-gallery-picker') {
+          const gInp = document.getElementById('direct-gallery-input');
+          if (gInp) gInp.click();
         } else if (action === 'open-photo-picker') {
           ui.photoDraft = null;
           ui.modal = 'photoPicker';
@@ -7395,12 +7760,15 @@
             const isVO = draft.mode === 'viewOnce';
             const isMist10 = draft.mode === 'mist10';
             const is24h = draft.mode === 'h24';
-            pushMessageToChat(chat, {
-              id: 'm_' + Date.now(),
-              sender: 'me',
-              senderName: 'You',
-              type: 'image',
-              imageUrl: draft.url,
+            const msgId = 'm_' + Date.now();
+            (async () => {
+              const finalUrl = await uploadMediaToSupabaseStorage(draft.url, 'photos', 'jpg');
+              pushMessageToChat(chat, {
+                id: msgId,
+                sender: 'me',
+                senderName: 'You',
+                type: 'image',
+                imageUrl: finalUrl,
               viewOnce: isVO,
               viewedOnce: false,
               mistDissolve: isMist10,
@@ -7410,12 +7778,13 @@
               expiresAt: is24h ? (Date.now() + 24 * 3600 * 1000) : null,
               time: nowTime(),
               status: 'sent',
-              reactions: [],
-              starred: false
-            });
-            render();
-            renderModal();
-            scrollToBottom();
+                reactions: [],
+                starred: false
+              });
+              render();
+              renderModal();
+              scrollToBottom();
+            })();
             showToast(isMist10 ? '10s Mist photo sent' : (isVO ? 'One View photo sent' : (is24h ? '24 Hour photo sent' : 'Photo sent')));
           } else {
             renderModal();
@@ -7461,6 +7830,7 @@
           burnActiveViewOnce();
         } else if (action === 'play-voice') {
           clearTimeout(voicePlayTimer);
+          if (activeVoicePlayer) { try { activeVoicePlayer.pause(); } catch (_) {} activeVoicePlayer = null; }
           const id = btn.dataset.id;
           const chat = getSelectedChat();
           const targetMsg = chat && chat.messages && chat.messages.find(m => m.id === id);
@@ -7469,11 +7839,24 @@
             if (targetMsg && targetMsg.viewOnce) { deleteMessageEverywhere(chat, targetMsg.id); showToast('Once View voice deleted'); }
           } else {
             ui.playingVoiceId = id;
-            voicePlayTimer = setTimeout(() => {
-              ui.playingVoiceId = null;
-              if (targetMsg && targetMsg.viewOnce) { deleteMessageEverywhere(chat, targetMsg.id); showToast('Once View voice deleted'); }
-              render();
-            }, 3000);
+            if (targetMsg && targetMsg.audioUrl) {
+              try {
+                activeVoicePlayer = new Audio(targetMsg.audioUrl);
+                activeVoicePlayer.onended = () => {
+                  ui.playingVoiceId = null;
+                  activeVoicePlayer = null;
+                  if (targetMsg.viewOnce) { deleteMessageEverywhere(chat, targetMsg.id); showToast('Once View voice deleted'); }
+                  render();
+                };
+                activeVoicePlayer.play().catch(() => {});
+              } catch (_) {}
+            } else {
+              voicePlayTimer = setTimeout(() => {
+                ui.playingVoiceId = null;
+                if (targetMsg && targetMsg.viewOnce) { deleteMessageEverywhere(chat, targetMsg.id); showToast('Once View voice deleted'); }
+                render();
+              }, 3000);
+            }
           }
           render();
         } else if (action === 'open-secret-vault') {
@@ -7723,18 +8106,11 @@
           showToast('Status deleted');
         } else if (action === 'reply-status') {
           clearTimeout(statusAutoTimer);
-          const st = getActiveStatuses().find(x => x.id === btn.dataset.id);
           const em = btn.dataset.emoji;
           ui.activeStatusId = null;
-          if (st) {
-            const targetChatId = st.chatId || (st.authorId && st.authorId !== activeVaultId ? makeRoomId(activeVaultId, st.authorId) : null);
-            const target = targetChatId && getMergedChats().find(c => c.id === targetChatId);
-            if (target) {
-              pushMessageToChat(target, { id: 'm_' + Date.now(), sender: 'me', senderName: 'You', type: 'text', text: `Reacted ${em} to your 24h status`, time: nowTime(), status: 'read', reactions: [], starred: false });
-            }
-          }
+          renderStatusViewer();
           render();
-          showToast(`Sent ${em} reaction`);
+          showToast(`Reacted ${em}`);
         } else if (action === 'status-bg') {
           ui.statusDraftBg = btn.dataset.bg;
           const ta = document.getElementById('status-text-input');
@@ -8304,11 +8680,15 @@
           const sizeLabel = kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB';
           const chat = getSelectedChat();
           if (chat) {
-            pushMessageToChat(chat, { id: 'm_doc_' + Date.now(), sender: 'me', senderName: 'You', type: 'document', fileName: docFile.name || 'Document', fileSize: sizeLabel, time: nowTime(), status: 'sent', reactions: [], starred: false });
-            ui.attachMenuOpen = false;
-            render();
-            scrollToBottom();
-            showToast('Document sent');
+            (async () => {
+              showToast('Uploading document...');
+              const fileUrl = await uploadMediaToSupabaseStorage(docFile, 'docs', 'bin');
+              pushMessageToChat(chat, { id: 'm_doc_' + Date.now(), sender: 'me', senderName: 'You', type: 'document', fileName: docFile.name || 'Document', fileSize: sizeLabel, fileUrl: fileUrl || '', time: nowTime(), status: 'sent', reactions: [], starred: false });
+              ui.attachMenuOpen = false;
+              render();
+              scrollToBottom();
+              showToast('Document sent');
+            })();
           }
         } else if (e.target && e.target.id === 'shavlo-vault-photo-input' && e.target.files && e.target.files[0]) {
           const picked = e.target.files[0];
@@ -8321,19 +8701,50 @@
             renderModal();
             showToast('Saved to shavlo Vault');
           });
-        } else if (e.target && (e.target.id === 'chat-photo-input' || e.target.id === 'chat-gallery-file-input') && e.target.files && e.target.files[0]) {
+        } else if (e.target && (e.target.id === 'chat-photo-input' || e.target.id === 'chat-gallery-file-input' || e.target.id === 'direct-gallery-input') && e.target.files && e.target.files[0]) {
           const pickedFile = e.target.files[0];
           e.target.value = '';
-          processChatMediaFile(pickedFile, (dataUrl) => {
-            const zeroBurn = !!(ui.mistPickerOpen && !ui.mistNext && !ui.mist24h); ui.photoDraft = { url: dataUrl, mode: zeroBurn ? 'mist10' : (ui.mist24h ? 'h24' : (ui.photoDefaultMode || 'normal')) };
-            ui.modal = 'photoPicker';
-            renderModal();
-          });
+          if (pickedFile.type && pickedFile.type.startsWith('video/')) {
+            if (pickedFile.size > 25 * 1024 * 1024) { showToast('Please pick a video under 25 MB'); return; }
+            (async () => {
+              const chat = getSelectedChat();
+              if (!chat) return;
+              showToast('Uploading video...');
+              const cdnVid = await uploadMediaToSupabaseStorage(pickedFile, 'videos', 'mp4');
+              if (cdnVid) {
+                pushMessageToChat(chat, { id: 'm_' + Date.now(), sender: 'me', senderName: 'You', type: 'video', videoUrl: cdnVid, time: nowTime(), status: 'sent', reactions: [], starred: false });
+                ui.attachMenuOpen = false;
+                ui.modal = null;
+                render();
+                scrollToBottom();
+                showToast('Video sent');
+              } else {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  pushMessageToChat(chat, { id: 'm_' + Date.now(), sender: 'me', senderName: 'You', type: 'video', videoUrl: reader.result, time: nowTime(), status: 'sent', reactions: [], starred: false });
+                  ui.attachMenuOpen = false;
+                  ui.modal = null;
+                  render();
+                  scrollToBottom();
+                  showToast('Video sent');
+                };
+                reader.readAsDataURL(pickedFile);
+              }
+            })();
+          } else {
+            processChatMediaFile(pickedFile, (dataUrl) => {
+              const zeroBurn = !!(ui.mistPickerOpen && !ui.mistNext && !ui.mist24h);
+              ui.photoDraft = { url: dataUrl, mode: zeroBurn ? 'mist10' : (ui.mist24h ? 'h24' : (ui.photoDefaultMode || 'normal')) };
+              ui.attachMenuOpen = false;
+              ui.modal = 'photoPicker';
+              renderModal();
+            });
+          }
         } else if (e.target && e.target.id === 'status-photo-input' && e.target.files && e.target.files[0]) {
           processChatMediaFile(e.target.files[0], (dataUrl) => {
             ui.statusDraftPhoto = dataUrl;
             renderModal();
-          });
+          }, 720);
         } else if (e.target && e.target.id === 'upi-scan-qr-input' && e.target.files && e.target.files[0]) {
           e.target.value = '';
           ui.upiTab = 'send';
@@ -8748,6 +9159,7 @@
           clearTimeout(walkieDemoTimer);
           ui.walkieSpeaking = true;
           ui.walkiePeerSpeaking = false;
+          startWalkieCapture();
           triggerHaptic(10);
           playSubtleTone('walkie_on');
           render();
@@ -8859,6 +9271,7 @@
         if (walkiePttActive) {
           walkiePttActive = false;
           ui.walkieSpeaking = false;
+          stopAndBroadcastWalkie(ui.walkieChatId || (getSelectedChat() && getSelectedChat().id));
           playSubtleTone('walkie_off');
           const chat = getSelectedChat();
           if (!isCancel && chat && !chat.isPeer) {
@@ -9367,10 +9780,27 @@
         if (vaults[existingId]) {
           activeVaultId = existingId;
           state = vaults[existingId];
+          if (state.userProfile && String(state.userProfile.friendCode || '').length > 10) {
+            const baseHex = String(existingId || 'A1B2C3D4E5F6').replace(/[^A-F0-9]/gi, 'A').padEnd(12, '0');
+            state.userProfile.friendCode = String((parseInt(baseHex.slice(0, 12), 16) % 900000000) + 100000000);
+            persistCurrentVault();
+          }
           registerCurrentUserInDirectory();
           syncFromNetwork();
           startSupaPolling();
         }
+      }
+      if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+        try { navigator.serviceWorker.register('./sw.js').catch(() => {}); } catch (e) {}
+      }
+      if (window.visualViewport) {
+        const syncVvHeight = () => {
+          const appEl = document.getElementById('app');
+          if (appEl) appEl.style.height = Math.round(window.visualViewport.height) + 'px';
+          if (window.scrollY !== 0) window.scrollTo(0, 0);
+        };
+        window.visualViewport.addEventListener('resize', syncVvHeight, { passive: true });
+        syncVvHeight();
       }
       render();
     })();
