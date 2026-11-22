@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>shavlo v1.3.5 — Private Messages, Calls &amp; UPI</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.47.10/dist/umd/supabase.min.js"></script>
@@ -243,28 +243,32 @@
       will-change: transform, opacity;
     }
     .attach-liquid-glass {
-      background: linear-gradient(155deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0.16) 100%);
-      backdrop-filter: blur(14px) saturate(185%) brightness(1.03);
-      -webkit-backdrop-filter: blur(14px) saturate(185%) brightness(1.03);
-      border: 1px solid rgba(255, 255, 255, 0.72);
-      box-shadow: 0 14px 38px -10px rgba(9, 9, 12, 0.16), inset 0 1.5px 1px rgba(255, 255, 255, 0.92), inset 0 -1px 1px rgba(255, 255, 255, 0.35);
+      background: linear-gradient(155deg, rgba(255, 255, 255, 0.36) 0%, rgba(255, 255, 255, 0.10) 48%, rgba(255, 255, 255, 0.22) 100%);
+      backdrop-filter: blur(28px) saturate(210%) brightness(1.06);
+      -webkit-backdrop-filter: blur(28px) saturate(210%) brightness(1.06);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 18px 44px -10px rgba(9, 9, 12, 0.16), inset 0 2px 2px rgba(255, 255, 255, 0.95), inset 0 -1.5px 2px rgba(255, 255, 255, 0.45);
     }
     .dark .attach-liquid-glass, .attach-liquid-glass-dark {
-      background: linear-gradient(155deg, rgba(255, 255, 255, 0.14) 0%, rgba(20, 20, 26, 0.22) 55%, rgba(255, 255, 255, 0.08) 100%);
-      backdrop-filter: blur(16px) saturate(170%);
-      -webkit-backdrop-filter: blur(16px) saturate(170%);
-      border: 1px solid rgba(255, 255, 255, 0.26);
-      box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.52), inset 0 1.5px 1px rgba(255, 255, 255, 0.28), inset 0 -1px 1px rgba(255, 255, 255, 0.08);
+      background: linear-gradient(155deg, rgba(255, 255, 255, 0.18) 0%, rgba(18, 18, 24, 0.28) 52%, rgba(255, 255, 255, 0.10) 100%);
+      backdrop-filter: blur(28px) saturate(200%) brightness(1.05);
+      -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.05);
+      border: 1px solid rgba(255, 255, 255, 0.34);
+      box-shadow: 0 20px 46px -10px rgba(0, 0, 0, 0.56), inset 0 2px 2px rgba(255, 255, 255, 0.36), inset 0 -1.5px 2px rgba(255, 255, 255, 0.12);
     }
     .attach-glass-tile {
-      background: rgba(255, 255, 255, 0.14);
-      border: 1px solid rgba(255, 255, 255, 0.58);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 4px 12px -6px rgba(9, 9, 12, 0.12);
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.12) 100%);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.88), 0 6px 16px -6px rgba(9, 9, 12, 0.12);
     }
     .dark .attach-glass-tile {
-      background: rgba(255, 255, 255, 0.07);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.05) 100%);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.24), 0 6px 16px -6px rgba(0, 0, 0, 0.32);
     }
     /* Feature 3: Double-Tap Wallpaper Shoulder Veil (Simple Blur) */
     [data-bubble-inner] {
@@ -463,6 +467,12 @@
     .dark .wp-dots { background-color: #0B0B0F; background-image: radial-gradient(rgba(165,153,251,0.16) 1.2px, transparent 1.2px); background-size: 18px 18px; }
     .wp-geo { background-color: #F7F7FA; background-image: url("data:image/svg+xml,%3Csvg width='44' height='44' viewBox='0 0 44 44' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M22 0L44 22L22 44L0 22z' fill='none' stroke='%237E6DF5' stroke-opacity='0.09' stroke-width='1'/%3E%3C/svg%3E"); }
     .dark .wp-geo { background-color: #0B0B0F; background-image: url("data:image/svg+xml,%3Csvg width='44' height='44' viewBox='0 0 44 44' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M22 0L44 22L22 44L0 22z' fill='none' stroke='%23A599FB' stroke-opacity='0.1' stroke-width='1'/%3E%3C/svg%3E"); }
+    [data-msg-bubble] { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+    @keyframes msgPopIn {
+      from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.985); }
+      to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    }
+    .msg-pop-in { animation: msgPopIn 160ms cubic-bezier(0.22, 1, 0.36, 1); }
     .msg-hover-bar { transform: translate3d(0,4px,0); opacity: 0; pointer-events: none; transition: transform 0.12s ease-out, opacity 0.12s ease-out; will-change: transform, opacity; }
     .group:hover .msg-hover-bar, .group:focus-within .msg-hover-bar { transform: translate3d(0,0,0); opacity: 1; pointer-events: auto; }
     @keyframes statusFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
@@ -521,8 +531,8 @@
     .status-cube-stage {
       position: relative;
       width: 100%;
-      max-width: 24rem;
-      min-height: 500px;
+      height: 100%;
+      max-width: 100%;
       transform-style: preserve-3d;
       -webkit-transform-style: preserve-3d;
       will-change: transform;
@@ -532,7 +542,7 @@
       inset: 0;
       backface-visibility: hidden;
       -webkit-backface-visibility: hidden;
-      border-radius: 28px;
+      border-radius: 0;
       overflow: hidden;
       will-change: transform, filter;
     }
@@ -649,7 +659,7 @@
           return `<span title="Sent" class="${onDarkBubble ? 'text-white/75' : 'text-zinc-400'}">${icon('checkSingle', 'w-3.5 h-3.5')}</span>`;
         }
         if (showBlue) {
-          return `<span title="Read" class="text-[#C6A76D]">${icon('checkDouble', 'w-3.5 h-3.5')}</span>`;
+          return `<span title="Read" class="text-[#C6A76D] inline-flex items-center"><svg class="w-[18px] h-3.5" viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 13l3.5 3.5L13 8.5"/><path d="M8 13l3.5 3.5L19.5 8.5"/><path d="M14.5 13l3.5 3.5L26 8.5"/></svg></span>`;
         }
         return `<span title="Delivered" class="${onDarkBubble ? 'text-white/80' : 'text-zinc-400'}">${icon('checkDouble', 'w-3.5 h-3.5')}</span>`;
       }
@@ -1056,7 +1066,7 @@
       let supaStatus = 'local'; // 'local' | 'connected' | 'realtime' | 'error'
       let supaLastError = '';
 
-      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.0 Production Supabase Schema (Storage + Read Receipts + Push Subs + Indexes + Realtime)\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public)\nvalues ('shavlo-media', 'shavlo-media', true)\non conflict (id) do update set public = true;\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\nexception when duplicate_object then\n  null;\nend $$;\n";
+      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public)\nvalues ('shavlo-media', 'shavlo-media', true)\non conflict (id) do update set public = true;\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 1800000);'\n  );\nexception when others then\n  null;\nend $$;\n";
 
       const SUPA_DEFAULT_URL = 'https://vgtxcwltweprtuhgnabl.supabase.co';
       const SUPA_DEFAULT_KEY = 'sb_publishable__twtq_01qxArecbTMAdPXQ_LzSfaI1V';
@@ -1110,6 +1120,40 @@
             }
           }
         } catch (e) { /* ignore malformed invite */ }
+      })();
+
+      function buildFriendInviteUrl(code) {
+        const clean = String(code || '').trim();
+        if (!clean) return '';
+        if (window.location.origin && window.location.origin !== 'null' && /^https?:/i.test(window.location.protocol)) {
+          return window.location.origin + window.location.pathname + '?add=' + encodeURIComponent(clean);
+        }
+        return 'SHAVLO:FC:' + clean;
+      }
+
+      function extractFriendCodeFromQr(rawText) {
+        const s = String(rawText || '').trim();
+        if (!s) return '';
+        const qm = s.match(/[?&]add=([A-Za-z0-9_-]+)/i);
+        if (qm && qm[1]) return decodeURIComponent(qm[1]).trim().toUpperCase();
+        const pm = s.match(/SHAVLO:FC:([A-Za-z0-9_-]+)/i);
+        if (pm && pm[1]) return pm[1].trim().toUpperCase();
+        const dm = s.match(/\b(\d{6,9})\b/);
+        if (dm && dm[1]) return dm[1];
+        return s.toUpperCase();
+      }
+
+      (function captureAddCodeFromUrl() {
+        try {
+          const qs = new URLSearchParams(window.location.search);
+          const addCode = qs.get('add');
+          if (addCode) {
+            sessionStorage.setItem('shavlo_pending_add_code', addCode.trim().toUpperCase());
+            if (window.history && window.history.replaceState) {
+              window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+            }
+          }
+        } catch (e) {}
       })();
 
       function buildCloudInviteLink() {
@@ -1264,7 +1308,7 @@
       function broadcastTyping(roomId) {
         if (!roomId || !activeVaultId) return;
         const now = Date.now();
-        if (now - lastTypingSentAt < 900) return;
+        if (now - lastTypingSentAt < 450) return;
         lastTypingSentAt = now;
         if (liveChannel) {
           try { liveChannel.postMessage({ type: 'peer_typing', roomId, fromId: activeVaultId }); } catch (err) {}
@@ -1336,7 +1380,7 @@
         offlineGraceTimers[key] = setTimeout(() => {
           if (ui.offlineGraceUntil[key] && Date.now() >= ui.offlineGraceUntil[key]) {
             delete ui.offlineGraceUntil[key];
-            safeBackgroundRender();
+            if (!updatePlusRingDOM()) safeBackgroundRender();
           }
         }, 5050);
       }
@@ -1465,6 +1509,49 @@
         } catch (e) {}
       }
 
+      function updatePlusRingDOM() {
+        const inner = document.getElementById('plus-ring-inner');
+        const solid = document.getElementById('plus-ring-solid');
+        const dotted = document.getElementById('plus-ring-dotted');
+        const btn = document.getElementById('chat-plus-btn');
+        const chat = state ? getSelectedChat() : null;
+        if (!inner || !btn || !chat) return false;
+        const isTypingNow = Boolean(ui.typingChatId === chat.id || ui.peerTypingRooms[chat.id]);
+        const isOnlineNow = isTypingNow || isChatOnline(chat);
+        const isInChatNow = isTypingNow || isPeerInChat(chat);
+        const ringPhase = isTypingNow ? 'typing' : (isInChatNow ? 'inchat' : (isOnlineNow ? 'online' : 'offline'));
+        triggerRingHaptic(chat.id, ringPhase);
+        inner.classList.toggle('online-plus-ring', isOnlineNow);
+        btn.classList.toggle('w-[38px]', isOnlineNow);
+        btn.classList.toggle('h-[38px]', isOnlineNow);
+        btn.classList.toggle('w-12', !isOnlineNow);
+        btn.classList.toggle('h-12', !isOnlineNow);
+        if (solid) {
+          const showSolid = isInChatNow && !isTypingNow;
+          solid.classList.toggle('opacity-100', showSolid);
+          solid.classList.toggle('scale-100', showSolid);
+          solid.classList.toggle('opacity-0', !showSolid);
+          solid.classList.toggle('scale-95', !showSolid);
+          solid.classList.toggle('pointer-events-none', !showSolid);
+        }
+        if (dotted) {
+          const showDot = isInChatNow && isTypingNow;
+          dotted.classList.toggle('opacity-100', showDot);
+          dotted.classList.toggle('opacity-0', !showDot);
+          dotted.classList.toggle('pointer-events-none', !showDot);
+        }
+        const tPill = document.getElementById('typing-pill-bar');
+        if (tPill) {
+          tPill.classList.toggle('hidden', !isTypingNow);
+          tPill.classList.toggle('opacity-100', isTypingNow);
+          tPill.classList.toggle('translate-y-0', isTypingNow);
+          tPill.classList.toggle('opacity-0', !isTypingNow);
+          tPill.classList.toggle('translate-y-1', !isTypingNow);
+          tPill.classList.toggle('pointer-events-none', !isTypingNow);
+        }
+        return true;
+      }
+
       function safeBackgroundRender() {
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
@@ -1475,11 +1562,11 @@
         if (!roomId) return;
         ui.peerTypingRooms[roomId] = true;
         clearTimeout(peerTypingTimers[roomId]);
-        safeBackgroundRender();
+        if (!updatePlusRingDOM()) safeBackgroundRender();
         peerTypingTimers[roomId] = setTimeout(() => {
           delete ui.peerTypingRooms[roomId];
-          safeBackgroundRender();
-        }, 2200);
+          if (!updatePlusRingDOM()) safeBackgroundRender();
+        }, 2600);
       }
 
       function closeWebRtc() {
@@ -1685,6 +1772,32 @@
 
       let roomOlderLoading = {};
       let roomHasNoMoreOlder = {};
+      function deleteMediaFromSupabaseStorage(publicUrl) {
+        const cfg = getSupaCfg();
+        const marker = '/storage/v1/object/public/shavlo-media/';
+        if (!cfg || !publicUrl || !String(publicUrl).includes(marker)) return;
+        const objPath = String(publicUrl).split(marker)[1];
+        if (!objPath) return;
+        const headers = { 'apikey': cfg.key };
+        if (cfg.key && cfg.key.startsWith('eyJ')) headers['Authorization'] = 'Bearer ' + cfg.key;
+        fetch(`${cfg.url}/storage/v1/object/shavlo-media/${objPath}`, { method: 'DELETE', headers }).catch(() => {});
+      }
+
+      function markRoomDelivered(roomId) {
+        if (!roomId || !activeVaultId || !state) return;
+        const net = getNetwork();
+        net.deliveredReceipts = net.deliveredReceipts || {};
+        net.deliveredReceipts[roomId] = net.deliveredReceipts[roomId] || {};
+        const nowD = Date.now();
+        if (nowD - (net.deliveredReceipts[roomId][activeVaultId] || 0) < 4000) return;
+        net.deliveredReceipts[roomId][activeVaultId] = nowD;
+        saveNetwork(net, 'delivered_receipt');
+        supaWriteReliable('shavlo_read_receipts', 'POST', '', {
+          room_id: roomId, user_id: activeVaultId, last_delivered_at: nowD,
+          last_read_at: (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][activeVaultId]) || 0
+        });
+      }
+
       function markRoomRead(roomId) {
         if (!roomId || !activeVaultId || !state) return;
         const net = getNetwork();
@@ -1692,8 +1805,12 @@
         net.readReceipts[roomId] = net.readReceipts[roomId] || {};
         net.readReceipts[roomId][activeVaultId] = Date.now();
         saveNetwork(net, 'read_receipt');
+        const ts = net.readReceipts[roomId][activeVaultId];
+        net.deliveredReceipts = net.deliveredReceipts || {};
+        net.deliveredReceipts[roomId] = net.deliveredReceipts[roomId] || {};
+        net.deliveredReceipts[roomId][activeVaultId] = ts;
         supaWriteReliable('shavlo_read_receipts', 'POST', '', {
-          room_id: roomId, user_id: activeVaultId, last_read_at: net.readReceipts[roomId][activeVaultId]
+          room_id: roomId, user_id: activeVaultId, last_delivered_at: ts, last_read_at: ts
         });
       }
 
@@ -1882,7 +1999,7 @@
             : '?select=*&order=created_at.desc&limit=150';
 
           const vidEnc = encodeURIComponent(activeVaultId);
-          const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts] = await Promise.all([
+          const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts, upiTxns, blocksRows] = await Promise.all([
             fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=*') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=*&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=*&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
@@ -1890,7 +2007,9 @@
             supaFetch('shavlo_messages', 'GET', msgQuery),
             fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=*&expires_at=gt.${Date.now()}`) : Promise.resolve(null),
             supaFetch('shavlo_calls', 'GET', `?select=*&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
-            supaFetch('shavlo_read_receipts', 'GET', '?select=*').catch(() => [])
+            supaFetch('shavlo_read_receipts', 'GET', '?select=*').catch(() => []),
+            supaFetch('shavlo_upi_txns', 'GET', `?select=*&or=(sender_id.eq.${vidEnc},receiver_id.eq.${vidEnc})&order=created_at.desc&limit=50`).catch(() => []),
+            supaFetch('shavlo_blocks', 'GET', `?select=*&or=(blocker_id.eq.${vidEnc},blocked_id.eq.${vidEnc})`).catch(() => [])
           ]);
           const msgs = (!forceFull && lastSupaMsgCreatedAt > 0) ? (msgsRaw || []) : (msgsRaw || []).slice().reverse();
           if (msgs.length > 0) {
@@ -1930,6 +2049,8 @@
             }));
           });
           Object.keys(groupedMsgs).forEach(rid => {
+            const hasIncomingFromPeer = groupedMsgs[rid].some(m => m.authorId && m.authorId !== activeVaultId);
+            if (hasIncomingFromPeer) markRoomDelivered(rid);
             const existing = Array.isArray(net.peerChats[rid]) ? net.peerChats[rid] : [];
             const byId = new Map(existing.map(m => [m.id, m]));
             groupedMsgs[rid].forEach(m => byId.set(m.id, Object.assign({}, byId.get(m.id) || {}, m)));
@@ -1950,10 +2071,53 @@
           });
 
           net.readReceipts = net.readReceipts || {};
+          net.deliveredReceipts = net.deliveredReceipts || {};
           (readReceipts || []).forEach(rr => {
             net.readReceipts[rr.room_id] = net.readReceipts[rr.room_id] || {};
             net.readReceipts[rr.room_id][rr.user_id] = Number(rr.last_read_at || 0);
+            net.deliveredReceipts[rr.room_id] = net.deliveredReceipts[rr.room_id] || {};
+            net.deliveredReceipts[rr.room_id][rr.user_id] = Math.max(Number(rr.last_delivered_at || 0), Number(rr.last_read_at || 0));
           });
+          if (Array.isArray(upiTxns) && upiTxns.length > 0 && state) {
+            state.upiHistory = state.upiHistory || [];
+            const existingIds = new Set(state.upiHistory.map(t => t.id));
+            let upiAdded = false;
+            upiTxns.forEach(tx => {
+              if (!existingIds.has(tx.id)) {
+                const isSent = tx.sender_id === activeVaultId;
+                const peerId = isSent ? tx.receiver_id : tx.sender_id;
+                const peerObj = (net.directory && net.directory[peerId]) || {};
+                state.upiHistory.push({
+                  id: tx.id,
+                  name: peerObj.name || 'Contact',
+                  upiId: peerObj.upiId || 'upi',
+                  amount: Number(tx.amount || 0),
+                  direction: isSent ? 'sent' : 'received',
+                  note: tx.note || 'UPI Payment',
+                  status: tx.status === 'escrow_held' ? 'Escrow Held' : 'Settled',
+                  date: 'Synced',
+                  txnId: tx.id
+                });
+                upiAdded = true;
+              }
+            });
+            if (upiAdded) persistCurrentVault();
+          }
+          if (Array.isArray(blocksRows) && state) {
+            ensureSecurityDefaults();
+            net.blockedByPeerIds = {};
+            blocksRows.forEach(b => {
+              if (b.blocker_id === activeVaultId && b.blocked_id) {
+                const roomId = makeRoomId(activeVaultId, b.blocked_id);
+                if (!state.security.blockedIds[roomId]) {
+                  const pObj = (net.directory && net.directory[b.blocked_id]) || {};
+                  state.security.blockedIds[roomId] = { name: pObj.name || 'User', peerVaultId: b.blocked_id };
+                }
+              } else if (b.blocked_id === activeVaultId && b.blocker_id) {
+                net.blockedByPeerIds[b.blocker_id] = true;
+              }
+            });
+          }
           saveNetwork(net, 'cloud_sync');
           if (supaStatus !== 'realtime') supaStatus = 'connected';
           supaLastError = '';
@@ -2006,10 +2170,19 @@
                     net.peerChats[row.room_id] = list;
                     if (Number(row.created_at || 0) > lastSupaMsgCreatedAt) lastSupaMsgCreatedAt = Number(row.created_at || 0);
                     saveNetwork(net, 'realtime_msg');
+                    if (change.eventType === 'UPDATE') {
+                      const existingBubble = document.querySelector(`[data-msg-bubble="${row.id}"]`);
+                      const curChat = getSelectedChat();
+                      if (existingBubble && curChat && curChat.id === row.room_id) {
+                        const normalized = Object.assign({}, mapped, { sender: mapped.authorId === activeVaultId ? 'me' : 'other', senderName: mapped.authorId === activeVaultId ? 'You' : curChat.name });
+                        existingBubble.outerHTML = renderBubble(curChat, normalized);
+                        return;
+                      }
+                    }
                     if (change.eventType === 'INSERT' && mapped.authorId !== activeVaultId) {
                       notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
                       const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === row.room_id && (window.innerWidth >= 768 || state.mobileView === 'chat'));
-                      if (isOpenNow) markRoomRead(row.room_id);
+                      if (isOpenNow) markRoomRead(row.room_id); else markRoomDelivered(row.room_id);
                     }
                     syncFromNetwork();
                     return;
@@ -2023,7 +2196,7 @@
                       net.peerChats[rid] = (net.peerChats[rid] || []).filter(m => m.id !== delId);
                       if (net.peerChats[rid].length !== before) changed = true;
                     });
-                    if (changed) { saveNetwork(net, 'realtime_del'); syncFromNetwork(); }
+                    if (changed) { saveNetwork(net, 'realtime_del'); const deadEl = document.querySelector(`[data-msg-bubble="${delId}"]`); if (deadEl) { deadEl.remove(); return; } syncFromNetwork(); }
                     return;
                   }
                 } catch (_) {}
@@ -2032,9 +2205,52 @@
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_requests' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_friendships' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_groups' }, () => scheduleSupaSync(250))
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_calls' }, () => scheduleSupaSync(80))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_users' }, () => scheduleSupaSync(400))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_txns' }, () => scheduleSupaSync(300))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_calls' }, (change) => {
+                try {
+                  const net = getNetwork();
+                  net.activeCalls = net.activeCalls || {};
+                  if (change && (change.eventType === 'INSERT' || change.eventType === 'UPDATE') && change.new && change.new.room_id) {
+                    const c = change.new;
+                    if (c.caller_id === activeVaultId || c.callee_id === activeVaultId) {
+                      net.activeCalls[c.room_id] = {
+                        roomId: c.room_id, callerId: c.caller_id, callerName: c.caller_name,
+                        calleeId: c.callee_id, calleeName: c.callee_name, type: c.call_type,
+                        status: c.status, startedAt: c.started_at
+                      };
+                      saveNetwork(net, 'realtime_call');
+                      syncFromNetwork();
+                      return;
+                    }
+                  } else if (change && change.eventType === 'DELETE' && change.old && change.old.room_id) {
+                    delete net.activeCalls[change.old.room_id];
+                    saveNetwork(net, 'realtime_call_end');
+                    syncFromNetwork();
+                    return;
+                  }
+                } catch (_) {}
+                scheduleSupaSync(60);
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_statuses' }, () => scheduleSupaSync(250))
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_read_receipts' }, () => scheduleSupaSync(250))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_read_receipts' }, (change) => {
+                try {
+                  if (change && change.new && change.new.room_id && change.new.user_id) {
+                    const rr = change.new;
+                    const net = getNetwork();
+                    net.readReceipts = net.readReceipts || {};
+                    net.readReceipts[rr.room_id] = net.readReceipts[rr.room_id] || {};
+                    net.readReceipts[rr.room_id][rr.user_id] = Number(rr.last_read_at || 0);
+                    net.deliveredReceipts = net.deliveredReceipts || {};
+                    net.deliveredReceipts[rr.room_id] = net.deliveredReceipts[rr.room_id] || {};
+                    net.deliveredReceipts[rr.room_id][rr.user_id] = Math.max(Number(rr.last_delivered_at || 0), Number(rr.last_read_at || 0));
+                    saveNetwork(net, 'realtime_rr');
+                    syncFromNetwork();
+                    return;
+                  }
+                } catch (_) {}
+                scheduleSupaSync(200);
+              })
               .on('broadcast', { event: 'ring_ping' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId) triggerRingPing(payload.roomId, payload.fromName, true);
               })
@@ -2082,12 +2298,14 @@
                   });
                   ui.onlineVaultIds = nextOnline;
                   ui.peerActiveRooms = nextRooms;
+                  updatePlusRingDOM();
                   safeBackgroundRender();
                 } catch (e) {}
               })
               .subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
                   supaStatus = 'realtime';
+                  lastPresKey = '';
                   syncOwnPresence();
                   safeBackgroundRender();
                 } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -2264,7 +2482,8 @@
         secretVaultUnlocked: false,
         secretPinError: '',
         pendingUnlockChatId: null,
-        cropAvatar: null
+        cropAvatar: null,
+        draftsByChat: {}
       };
 
       let statusAutoTimer = null;
@@ -2346,7 +2565,7 @@
 
         const ae = document.activeElement;
         const isTyping = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
-        if (isTyping && ae.id === 'message-input' && state.activeNav === 'messages') {
+        if (state.activeNav === 'messages' && !ui.activeCall && !ui.modal && (!isTyping || ae.id === 'message-input')) {
           const feed = document.getElementById('message-feed');
           const chat = getSelectedChat();
           if (feed && chat && !(ui.privateChatMode && ui.privateChatMode[chat.id])) {
@@ -2453,6 +2672,13 @@
         if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(u)) return u;
         if (/^data:image\/svg\+xml;(?:charset=utf-8,[A-Za-z0-9%_\-.!~*'()]+|base64,[A-Za-z0-9+/=]+)$/i.test(u)) return u;
         return '';
+      }
+
+      function formatRichMessageText(rawText) {
+        const escaped = escapeHtml(rawText || '');
+        return escaped.replace(/(https?:\/\/[^\s<]+)/gi, (u) => {
+          return `<a href="${u}" target="_blank" rel="noopener noreferrer" class="underline decoration-[#C6A76D]/80 underline-offset-2 hover:opacity-80">${u}</a>`;
+        });
       }
 
       function escapeHtml(str) {
@@ -2644,6 +2870,9 @@
           if (entry && entry.savedChat) {
             state.chats.push(entry.savedChat);
           }
+          if (activeVaultId && entry && entry.peerVaultId) {
+            supaWriteReliable('shavlo_blocks', 'DELETE', `?id=eq.${encodeURIComponent(activeVaultId + '__' + entry.peerVaultId)}`, null);
+          }
           persistCurrentVault();
           showToast(`Unblocked ${chatName || (entry && entry.name) || 'user'}`);
           return;
@@ -2768,12 +2997,14 @@
           const other = net.directory[otherId] || { name: 'Friend', friendCode: 'SMV-PEER', upiId: 'friend@upi', avatarText: 'F' };
           const roomId = makeRoomId(activeVaultId, otherId);
           const peerReadAt = (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][otherId]) || 0;
+          const peerDelivAt = (net.deliveredReceipts && net.deliveredReceipts[roomId] && net.deliveredReceipts[roomId][otherId]) || 0;
           const rawMsgs = (net.peerChats[roomId] || [])
             .filter(m => !m.expiresAt || m.expiresAt > nowMs)
             .map(m => {
               const isMine = m.authorId === activeVaultId;
+              const ts = Number(m.createdAt || 0);
               const liveStatus = isMine
-                ? ((peerReadAt > 0 && Number(m.createdAt || 0) <= peerReadAt) ? 'read' : (m.status || 'delivered'))
+                ? ((peerReadAt > 0 && ts <= peerReadAt) ? 'read' : ((peerDelivAt > 0 && ts <= peerDelivAt) ? 'delivered' : (m.status || 'sent')))
                 : m.status;
               return {
                 ...m,
@@ -3228,8 +3459,8 @@
       function renderFriendRequestsWindowContent() {
         const net = getNetwork();
         const incoming = (net.requests || []).filter(r => r.toId === activeVaultId);
-        const outgoing = (net.requests || []).filter(r => r.fromId === activeVaultId);
-        const total = incoming.length + outgoing.length;
+        const outgoing = [];
+        const total = incoming.length;
 
         const renderRow = (req, isOutgoing) => {
           const isEditing = ui.editingReqId === req.id;
@@ -3464,6 +3695,13 @@
         authState.authError = '';
         syncFromNetwork();
         showToast(`Signed in as ${state.userProfile.name}`);
+        try {
+          const pendingAdd = sessionStorage.getItem('shavlo_pending_add_code');
+          if (pendingAdd) {
+            sessionStorage.removeItem('shavlo_pending_add_code');
+            setTimeout(() => { sendFriendRequest(pendingAdd); }, 450);
+          }
+        } catch (e) {}
       }
 
       function logoutVault() {
@@ -3752,9 +3990,10 @@
         ui.attachMenuOpen = false;
         if (canFastAppend) {
           const feed = document.getElementById('message-feed');
-          if (feed) feed.insertAdjacentHTML('beforeend', renderBubble(chat, msg));
+          if (feed) { feed.insertAdjacentHTML('beforeend', renderBubble(chat, msg)); if (feed.lastElementChild) feed.lastElementChild.classList.add('msg-pop-in'); }
+          if (ui.draftsByChat && chat) delete ui.draftsByChat[chat.id];
           const inp = document.getElementById('message-input');
-          if (inp) inp.value = '';
+          if (inp) { inp.value = ''; inp.focus({ preventScroll: true }); }
           const sendBtn = document.getElementById('chat-send-btn');
           const micBtn = document.getElementById('chat-mic-btn');
           if (sendBtn) sendBtn.classList.add('hidden');
@@ -3861,6 +4100,18 @@
           starred: false
         };
         pushMessageToChat(chat, msg);
+        if (chat.isPeer && activeVaultId) {
+          supaWriteReliable('shavlo_upi_txns', 'POST', '', {
+            id: txnId || ('tx_' + Date.now()),
+            room_id: chat.id,
+            sender_id: activeVaultId,
+            receiver_id: chat.peerVaultId || '',
+            amount: num,
+            note: msg.note || 'UPI Payment',
+            status: isEscrow ? 'escrow_held' : 'settled',
+            created_at: Date.now()
+          });
+        }
         state.upiHistory.unshift({
           id: 'tx_' + Date.now(),
           name: chat.name,
@@ -4867,7 +5118,7 @@
                     <button data-action="open-friends-hub" title="Friends &amp; Requests" class="relative h-10 px-4 rounded-full bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold shadow-sm inline-flex items-center gap-1.5 transition">
                       ${icon('userAdd', 'w-[17px] h-[17px]')}
                       <span>Friends</span>
-                      ${(() => { const n = getNetwork().requests.filter(r => r.toId === activeVaultId || r.fromId === activeVaultId).length; return n > 0 ? `<span class="min-w-[18px] h-[18px] px-1 rounded-full bg-white text-zinc-950 text-[10.5px] font-extrabold flex items-center justify-center">${n}</span>` : ''; })()}
+                      ${(() => { const n = getNetwork().requests.filter(r => r.toId === activeVaultId).length; return n > 0 ? `<span class="min-w-[18px] h-[18px] px-1 rounded-full bg-white text-zinc-950 text-[10.5px] font-extrabold flex items-center justify-center">${n}</span>` : ''; })()}
                     </button>
                   </div>
                   <div data-smart-search="chats-scroll" class="smart-search-wrap">
@@ -5020,6 +5271,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
             <!-- Seamless Floating Composer Shelf (lifted slightly, borderless, merged into chat) -->
             <div style="padding-bottom:${ui.attachMenuOpen ? '0px' : 'max(1.75rem, env(safe-area-inset-bottom))'}; transform:translateZ(0);" class="absolute bottom-0 inset-x-0 z-20 ${ui.attachMenuOpen ? 'px-0' : 'px-3.5 sm:px-6'} pt-1 bg-transparent pointer-events-none">
+              <div id="typing-pill-bar" class="mb-1.5 flex justify-start transition-all duration-200 ${(ui.typingChatId === chat.id || ui.peerTypingRooms[chat.id]) ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none hidden'}">
+                <span class="px-3 py-1 rounded-full ${isPrivateMode ? 'glass-dark-pill text-white/85' : 'soft-bw-glass text-ink/80 dark:text-white/85'} text-[11.5px] font-semibold inline-flex items-center gap-1.5 shadow-sm">
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#C6A76D] animate-pulse"></span>
+                  <span>${escapeHtml(chat.name.split(' ')[0])} is typing...</span>
+                </span>
+              </div>
               <div class="pointer-events-auto ${ui.attachMenuOpen ? 'space-y-2.5' : ''}">
               <div class="${ui.attachMenuOpen ? 'px-3.5 sm:px-6' : ''}">
               ${ui.replyingTo ? `
@@ -5089,15 +5346,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                           </button>
                         ` : ''}
                         ${(ui.ringPingChats && ui.ringPingChats[chat.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
-                        <div class="relative ${isOnlineNow ? 'online-plus-ring' : ''} rounded-full">
-                          ${isInChatNow ? `
-                            <svg class="ring-second-layer ${isTypingNow ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}" viewBox="0 0 64 64" aria-hidden="true">
-                              <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2"/>
-                            </svg>
-                            <svg class="ring-second-layer ring-second-dotted ${isTypingNow ? 'opacity-100' : 'opacity-0 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
-                              <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
-                            </svg>
-                          ` : ''}
+                        <div id="plus-ring-inner" class="relative ${isOnlineNow ? 'online-plus-ring' : ''} rounded-full">
+                          <svg id="plus-ring-solid" class="ring-second-layer ${(isInChatNow && !isTypingNow) ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
+                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2"/>
+                          </svg>
+                          <svg id="plus-ring-dotted" class="ring-second-layer ring-second-dotted ${(isInChatNow && isTypingNow) ? 'opacity-100' : 'opacity-0 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
+                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
+                          </svg>
                           <button id="chat-plus-btn" type="button" data-action="toggle-attach" title="Tap for menu • Double-tap for timer" class="${isPrivateMode ? 'glass-dark-pill text-white' : (ui.attachMenuOpen ? 'bg-ink text-white dark:bg-white dark:text-ink' : 'soft-bw-glass text-ink dark:text-white')} ${isOnlineNow ? 'w-[38px] h-[38px]' : 'w-12 h-12'} rounded-full flex items-center justify-center select-none">
                             ${icon(ui.attachMenuOpen ? 'close' : 'plus', 'w-[22px] h-[22px]')}
                           </button>
@@ -5106,7 +5361,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     `;
                   })()}
                   <div id="composer-pill" class="${isPrivateMode ? 'glass-dark-pill' : 'soft-bw-glass'} ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5">
-                    <input id="message-input" type="text" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none" />
+                    <input id="message-input" type="text" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none" />
                     <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isPrivateMode ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-ink/70 dark:text-white/75 hover:text-ink dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'} transition">
                       ${icon('camera', 'w-[20px] h-[20px]')}
                     </button>
@@ -5121,35 +5376,35 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Hold &amp; swipe left for Walkie-Talkie" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] transition-transform duration-150 hover:scale-105 active:scale-95">
                     ${icon('mic', 'w-[20px] h-[20px]')}
                   </button>
-                  <button id="chat-send-btn" type="submit" title="Send" onmousedown="event.preventDefault()" class="hidden w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
+                  <button id="chat-send-btn" type="button" data-action="send-chat-now" title="Send" onmousedown="event.preventDefault()" ontouchstart="event.preventDefault()" class="hidden w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
                     <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
                   </button>
                 </form>
               `}
               </div>
               ${ui.attachMenuOpen ? `
-                <div style="margin-bottom:max(1rem, env(safe-area-inset-bottom));" class="mx-3 sm:mx-auto sm:max-w-lg px-4 pt-2.5 pb-4 rounded-[32px] ${isPrivateMode ? 'attach-liquid-glass-dark' : 'attach-liquid-glass'} attach-shelf-rise">
+                <div style="margin-bottom:max(1rem, env(safe-area-inset-bottom));" class="mx-3 sm:mx-auto sm:max-w-lg px-4 pt-3 pb-4 rounded-[42px] ${isPrivateMode ? 'attach-liquid-glass-dark' : 'attach-liquid-glass'} attach-shelf-rise">
                   <div class="w-8 h-1 rounded-full bg-black/15 dark:bg-white/25 mx-auto mb-3"></div>
                   <div class="grid grid-cols-4 gap-2">
-                    <button type="button" data-action="open-modal" data-modal="poll" class="py-2 px-1.5 rounded-[18px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
+                    <button type="button" data-action="open-modal" data-modal="poll" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
                       <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Polls</span>
                     </button>
-                    <input id="direct-gallery-input" type="file" accept="image/*,video/*" class="sr-only" /><button type="button" data-action="open-gallery-picker" class="py-2 px-1.5 rounded-[18px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
+                    <input id="direct-gallery-input" type="file" accept="image/*,video/*" class="sr-only" /><button type="button" data-action="open-gallery-picker" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
                       <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Gallery</span>
                     </button>
-                    <button type="button" data-action="open-modal" data-modal="shareContact" class="py-2 px-1.5 rounded-[18px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
+                    <button type="button" data-action="open-modal" data-modal="shareContact" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
                       <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Contacts</span>
                     </button>
-                    <button type="button" data-action="open-doc-picker" class="py-2 px-1.5 rounded-[18px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
+                    <button type="button" data-action="open-doc-picker" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
                       <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/></svg>
                       </span>
@@ -5216,7 +5471,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           } else if (msg.mistDissolve && msg.mistState === 'sealed') {
             body = `<button type="button" data-action="open-mist" data-id="${msg.id}" class="text-left py-1 flex items-center gap-2 text-[13.5px] font-semibold"><span class="w-2 h-2 rounded-full bg-current opacity-70 animate-pulse"></span><span>Mist Note • Tap to read</span></button>`;
           } else {
-            body = `<div class="relative overflow-hidden rounded-lg">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${escapeHtml(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
+            body = `<div class="relative overflow-hidden rounded-lg">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
           }
         } else if (msg.type === 'tug') {
           const p = Math.max(0, Math.min(100, Number(msg.pos ?? 50)));
@@ -5513,7 +5768,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       <input id="profile-photo-input" type="file" accept="image/*" class="sr-only" />
                     </div>
                     <div>
-                      <div class="title-display text-[22px] font-bold text-[#C6A76D] leading-tight tracking-[-0.02em]">${escapeHtml(state.userProfile.name)}</div>
+                      <div class="flex items-center gap-2">
+                        <div class="title-display text-[22px] font-bold text-[#C6A76D] leading-tight tracking-[-0.02em] truncate">${escapeHtml(state.userProfile.name)}</div>
+                        <button type="button" data-action="open-modal" data-modal="editUsername" title="Edit username" class="w-7 h-7 rounded-full bg-black/[0.06] dark:bg-white/[0.1] hover:bg-[#09090C] hover:text-white dark:hover:bg-white dark:hover:text-[#09090C] text-muted flex items-center justify-center shrink-0 transition">${icon('edit', 'w-3.5 h-3.5')}</button>
+                      </div>
 
                     </div>
                   </div>
@@ -5816,6 +6074,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                           <button type="submit" class="px-5 py-2 rounded-full bg-brand-500 hover:bg-brand-600 text-white text-[12.5px] font-semibold transition">Connect &amp; Sync</button>
                         </div>
                       </div>
+                      <div class="pt-3 mt-2 border-t border-black/[0.06] dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
+                        <button type="button" data-action="open-modal" data-modal="turnPushCfg" class="px-3.5 py-2 rounded-full bg-surface dark:bg-zinc-900 text-[12px] font-semibold text-ink dark:text-white hover:opacity-85 transition">Configure TURN &amp; Push</button>
+                        <span class="text-[11px] text-muted">${localStorage.getItem('shavlo_turn_cfg_v1') ? 'TURN Active ●' : 'STUN Default'}</span>
+                      </div>
                     </form>
                   </div>
 
@@ -5963,6 +6225,44 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </button>
             </div>
           `;
+        } else if (ui.modal === 'turnPushCfg') {
+          let curTurn = {};
+          try { curTurn = JSON.parse(localStorage.getItem('shavlo_turn_cfg_v1') || '{}'); } catch (_) {}
+          inner = `
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="title-display font-bold text-[19px]">TURN Relay &amp; Push</h3>
+              <button type="button" data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <form id="turn-push-form" class="space-y-3">
+              <div>
+                <label class="block text-[12px] font-semibold text-muted mb-1">TURN Server URL (optional 4G/5G calls)</label>
+                <input name="turnUrl" type="text" value="${escapeHtml(curTurn.urls || '')}" placeholder="turn:a.relay.metered.ca:80" class="w-full px-3.5 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <input name="turnUser" type="text" value="${escapeHtml(curTurn.username || '')}" placeholder="Username" class="w-full px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
+                <input name="turnCred" type="password" value="${escapeHtml(curTurn.credential || '')}" placeholder="Credential" class="w-full px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
+              </div>
+              <div>
+                <label class="block text-[12px] font-semibold text-muted mb-1">VAPID Public Key (optional Lock-Screen Push)</label>
+                <input name="vapidKey" type="text" value="${escapeHtml(localStorage.getItem('shavlo_vapid_pub_v1') || '')}" placeholder="BEl62iUYgUivxIkv..." class="w-full px-3.5 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
+              </div>
+              <button type="submit" class="w-full py-2.5 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold hover:opacity-90 transition">Save &amp; Enable</button>
+            </form>
+          `;
+        } else if (ui.modal === 'editUsername') {
+          inner = `
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="title-display font-bold text-[19px]">Edit Username</h3>
+              <button type="button" data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <form id="edit-username-form" class="space-y-3">
+              <div>
+                <label class="block text-[12px] font-semibold text-muted mb-1.5">Display name</label>
+                <input name="displayName" type="text" required maxlength="32" value="${escapeHtml(state.userProfile.name || '')}" placeholder="Enter your name" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[16px] font-medium focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
+              </div>
+              <button type="submit" class="w-full py-2.5 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold hover:opacity-90 transition">Save Username</button>
+            </form>
+          `;
         } else if (ui.modal === 'quickCamera') {
           inner = `
             <div class="flex items-center justify-between mb-4">
@@ -5982,7 +6282,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           `;
         } else if (ui.modal === 'friendsHub') {
           const net = getNetwork();
-          const reqCount = (net.requests || []).filter(r => r.toId === activeVaultId || r.fromId === activeVaultId).length;
+          const reqCount = (net.requests || []).filter(r => r.toId === activeVaultId).length;
           inner = `
             <div class="flex items-center justify-between mb-4">
               <h3 class="title-display font-bold text-[22px] tracking-tight text-ink dark:text-white">Friends</h3>
@@ -6008,25 +6308,34 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </div>
               ` : `
                 <div class="flex-1 flex flex-col justify-between">
-                  <form id="add-friend-form" class="space-y-3.5 pb-5">
-                    <label for="friend-code-input" class="block text-[14px] font-semibold text-ink dark:text-zinc-200">Friend code</label>
-                    <input id="friend-code-input" name="code" type="text" value="${escapeHtml(ui.friendCodeInput)}" placeholder="Paste their friend code" class="w-full h-12 px-4 rounded-2xl bg-surface dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 font-sans tabular-nums text-[14px] uppercase placeholder:normal-case placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
-                    <button type="submit" class="w-full h-12 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[14.5px] font-semibold inline-flex items-center justify-center gap-2 shadow-md shadow-brand-500/20 transition">
+                  <form id="add-friend-form" class="space-y-3 pb-4">
+                    <div class="flex items-center justify-between">
+                      <label for="friend-code-input" class="block text-[14px] font-semibold text-ink dark:text-zinc-200">Friend code</label>
+                      <button type="button" data-action="open-friend-qr-scan" class="px-3 py-1 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold inline-flex items-center gap-1.5 hover:opacity-85 transition">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="4" height="4"/><rect x="13" y="7" width="4" height="4"/><rect x="7" y="13" width="4" height="4"/><path d="M13 13h4v4h-4z"/></svg>
+                        <span>Scan QR</span>
+                      </button>
+                      <input id="friend-qr-file-input" type="file" accept="image/*" capture="environment" class="sr-only" />
+                    </div>
+                    <input id="friend-code-input" name="code" type="text" value="${escapeHtml(ui.friendCodeInput)}" placeholder="Enter 9-digit friend code" class="w-full h-11 px-4 rounded-2xl bg-surface dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 font-sans tabular-nums text-[15px] uppercase placeholder:normal-case placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
+                    <button type="submit" class="w-full h-11 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[14.5px] font-semibold inline-flex items-center justify-center gap-2 shadow-md shadow-brand-500/20 transition">
                       ${icon('userAdd', 'w-[18px] h-[18px]')}<span>Send request</span>
                     </button>
                   </form>
 
-                  <div class="pt-5 border-t border-zinc-200/70 dark:border-zinc-800 space-y-2.5">
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="min-w-0">
-                        <div class="text-[13.5px] font-medium text-muted">Your friend code</div>
-                        <div class="font-sans tabular-nums font-semibold text-[14px] tracking-tight text-ink dark:text-white break-all select-all mt-1">${escapeHtml(state.userProfile.friendCode)}</div>
-                      </div>
-                      <button type="button" data-action="copy-raw" data-text="${escapeHtml(state.userProfile.friendCode)}" title="Copy friend code" class="w-11 h-11 rounded-full bg-surface dark:bg-zinc-900 hover:bg-brand-50 border border-zinc-200/70 dark:border-zinc-800 text-ink dark:text-white flex items-center justify-center shrink-0 transition">
-                        ${icon('copy', 'w-[18px] h-[18px]')}
-                      </button>
+                  <div class="pt-4 border-t border-zinc-200/70 dark:border-zinc-800 flex items-center gap-3.5">
+                    <div class="p-1.5 rounded-2xl bg-white border border-black/10 shrink-0 shadow-sm">
+                      <img src="${generateUpiQrDataUrl(buildFriendInviteUrl(state.userProfile.friendCode))}" alt="Your Friend QR" class="w-20 h-20 object-contain" />
                     </div>
-                    <p class="text-[13.5px] text-muted">Share this code with the person you want to add.</p>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-[12.5px] font-medium text-muted">Your code &amp; QR</div>
+                      <div class="font-sans tabular-nums font-bold text-[17px] tracking-tight text-ink dark:text-white select-all mt-0.5">${escapeHtml(state.userProfile.friendCode)}</div>
+                      <div class="flex items-center gap-2 mt-2">
+                        <button type="button" data-action="copy-raw" data-text="${escapeHtml(state.userProfile.friendCode)}" class="px-3 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12px] font-semibold text-ink dark:text-white inline-flex items-center gap-1 hover:opacity-80 transition">
+                          ${icon('copy', 'w-3.5 h-3.5')}<span>Copy code</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               `}
@@ -6054,7 +6363,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           `;
         } else if (ui.modal === 'addFriend') {
           const net = getNetwork();
-          const pendingCount = (net.requests || []).filter(r => r.toId === activeVaultId || r.fromId === activeVaultId).length;
+          const pendingCount = (net.requests || []).filter(r => r.toId === activeVaultId).length;
           inner = `
             <div class="flex items-center justify-between mb-5">
               <h3 class="title-display font-bold text-[22px] tracking-tight text-ink dark:text-white">Add a friend</h3>
@@ -6944,7 +7253,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       function buildStatusFaceMarkup(st, idx, list, animateBar) {
         const isMine = st.authorId === activeVaultId;
         return `
-          <div class="w-full h-full min-h-[500px] bg-gradient-to-br ${st.bg} text-white shadow-2xl flex flex-col justify-between p-5 relative select-none">
+          <div style="padding-top:max(1.1rem, env(safe-area-inset-top)); padding-bottom:max(1.35rem, env(safe-area-inset-bottom));" class="w-full h-full bg-gradient-to-br ${st.bg} text-white flex flex-col justify-between px-5 relative select-none">
             ${st.photoUrl ? `<img src="${escapeHtml(st.photoUrl)}" alt="Status" class="absolute inset-0 w-full h-full object-cover pointer-events-none" /><div class="absolute inset-0 bg-gradient-to-b from-black/55 via-black/15 to-black/65 pointer-events-none"></div>` : ''}
 
             <!-- Header & Smooth Progress Bars -->
@@ -6978,7 +7287,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <p class="title-display text-[22px] font-bold leading-snug text-center px-3 pointer-events-none">${escapeHtml(st.text)}</p>
             </div>
 
-            <!-- Bottom Controls -->
+            <!-- Viewer List (for your own status) + Bottom Controls -->
+            ${isMine ? (() => {
+              const netDir = getNetwork().directory || {};
+              const viewers = (st.seenBy || []).filter(vid => vid && vid !== activeVaultId).map(vid => (st.seenNames && st.seenNames[vid]) || (netDir[vid] && netDir[vid].name) || 'Contact');
+              return `<div class="relative z-20 mb-2.5 flex justify-center"><span class="px-3.5 py-1.5 rounded-full bg-black/45 backdrop-blur-md text-[12px] font-semibold text-white/95 inline-flex items-center gap-1.5"><span>👁 ${viewers.length}</span><span>${viewers.length ? ('Seen by ' + escapeHtml(viewers.join(', '))) : 'No views yet'}</span></span></div>`;
+            })() : ''}
             <div class="relative z-20 flex items-center justify-between gap-2">
               <button data-action="nav-status" data-dir="-1" class="px-3.5 py-1.5 rounded-full bg-black/35 hover:bg-black/55 text-[12px] font-semibold ${idx === 0 ? 'opacity-30 pointer-events-none' : ''}">Prev</button>
               <div class="flex items-center gap-2">
@@ -6993,9 +7307,22 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       function markStatusSeen(stId) {
         const net = getNetwork();
         const liveSt = (net.statuses || []).find(x => x.id === stId);
-        if (liveSt) {
+        if (liveSt && activeVaultId) {
           liveSt.seenBy = liveSt.seenBy || [];
-          if (!liveSt.seenBy.includes(activeVaultId)) { liveSt.seenBy.push(activeVaultId); saveNetwork(net, 'status_seen'); }
+          liveSt.seenNames = liveSt.seenNames || {};
+          let changed = false;
+          if (!liveSt.seenBy.includes(activeVaultId)) {
+            liveSt.seenBy.push(activeVaultId);
+            changed = true;
+          }
+          if (state && state.userProfile && state.userProfile.name && !liveSt.seenNames[activeVaultId]) {
+            liveSt.seenNames[activeVaultId] = state.userProfile.name;
+            changed = true;
+          }
+          if (changed) {
+            saveNetwork(net, 'status_seen');
+            supaWriteReliable('shavlo_statuses', 'PATCH', `?id=eq.${encodeURIComponent(liveSt.id)}`, { payload: liveSt });
+          }
         } else if (state) {
           const samp = (state.sampleStatuses || []).find(x => x.id === stId);
           if (samp) { samp.seen = true; persistCurrentVault(); }
@@ -7153,7 +7480,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         const st = list[idx];
 
         root.innerHTML = `
-          <div data-action="close-status-backdrop" class="status-cube-scene fixed inset-0 z-[75] bg-black/90 flex items-center justify-center p-4 overflow-hidden">
+          <div data-action="close-status-backdrop" class="status-cube-scene fixed inset-0 z-[75] bg-black flex items-center justify-center p-0 overflow-hidden">
             <div id="status-cube-stage" class="status-cube-stage">
               <div id="status-face-current" class="status-cube-face">
                 ${buildStatusFaceMarkup(st, idx, list, true)}
@@ -7573,7 +7900,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             } else if (chat.isPeer) {
               const net = getNetwork();
               const pm = (net.peerChats[chat.id] || []).find(m => m.id === btn.dataset.msgid);
-              if (pm && pm.participants && pm.participants[idx]) { pm.participants[idx].paid = true; saveNetwork(net, 'peer_update'); render(); }
+              if (pm && pm.participants && pm.participants[idx]) { pm.participants[idx].paid = true; saveNetwork(net, 'peer_update'); supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(pm.id)}`, { payload: pm }); render(); }
             } else {
               msg.participants[idx].paid = true;
               persistCurrentVault();
@@ -7587,10 +7914,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             const net = getNetwork();
             const msg = (net.peerChats[chat.id] || []).find(m => m.id === btn.dataset.msgid);
             if (msg && msg.options) {
-              msg.options.forEach(o => { const i = o.votes.indexOf('You'); if (i !== -1) o.votes.splice(i, 1); });
+              const voter = (state && state.userProfile && state.userProfile.name) || 'You';
+              msg.options.forEach(o => { const i = o.votes.indexOf(voter); if (i !== -1) o.votes.splice(i, 1); });
               const target = msg.options.find(o => o.id === optId);
-              if (target) target.votes.push('You');
+              if (target) target.votes.push(voter);
               saveNetwork(net, 'peer_update');
+              supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(msg.id)}`, { payload: msg });
               render();
             }
           } else if (chat) {
@@ -7690,6 +8019,22 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             render();
             scrollToBottom();
           }
+        } else if (action === 'send-chat-now') {
+          const inp = document.getElementById('message-input');
+          if (inp && inp.value.trim()) {
+            sendTextMessage(inp.value);
+            inp.focus({ preventScroll: true });
+          }
+        } else if (action === 'jump-to-msg') {
+          const el = document.querySelector(`[data-msg-bubble="${btn.dataset.id}"]`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('ring-2', 'ring-[#C6A76D]', 'rounded-2xl', 'transition');
+            setTimeout(() => { el.classList.remove('ring-2', 'ring-[#C6A76D]', 'rounded-2xl'); }, 1300);
+          }
+        } else if (action === 'open-friend-qr-scan') {
+          const fqInp = document.getElementById('friend-qr-file-input');
+          if (fqInp) fqInp.click();
         } else if (action === 'load-older-msgs') {
           loadOlderMessages(btn.dataset.id);
         } else if (action === 'open-camera-capture') {
@@ -7761,14 +8106,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             const isMist10 = draft.mode === 'mist10';
             const is24h = draft.mode === 'h24';
             const msgId = 'm_' + Date.now();
-            (async () => {
-              const finalUrl = await uploadMediaToSupabaseStorage(draft.url, 'photos', 'jpg');
-              pushMessageToChat(chat, {
-                id: msgId,
-                sender: 'me',
-                senderName: 'You',
-                type: 'image',
-                imageUrl: finalUrl,
+            const optMsg = {
+              id: msgId,
+              sender: 'me',
+              senderName: 'You',
+              type: 'image',
+              imageUrl: draft.url,
               viewOnce: isVO,
               viewedOnce: false,
               mistDissolve: isMist10,
@@ -7778,13 +8121,19 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               expiresAt: is24h ? (Date.now() + 24 * 3600 * 1000) : null,
               time: nowTime(),
               status: 'sent',
-                reactions: [],
-                starred: false
-              });
-              render();
-              renderModal();
-              scrollToBottom();
-            })();
+              reactions: [],
+              starred: false
+            };
+            pushMessageToChat(chat, optMsg);
+            render();
+            renderModal();
+            scrollToBottom();
+            uploadMediaToSupabaseStorage(draft.url, 'photos', 'jpg').then((cdnUrl) => {
+              if (cdnUrl && cdnUrl.startsWith('http') && chat.isPeer) {
+                optMsg.imageUrl = cdnUrl;
+                supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(msgId)}`, { payload: { ...optMsg, authorId: activeVaultId, authorName: state.userProfile.name } });
+              }
+            });
             showToast(isMist10 ? '10s Mist photo sent' : (isVO ? 'One View photo sent' : (is24h ? '24 Hour photo sent' : 'Photo sent')));
           } else {
             renderModal();
@@ -8072,22 +8421,19 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'set-disappear') {
           ensureSecurityDefaults();
           const id = btn.dataset.id;
-          state.security.disappearTimers[id] = Number(btn.dataset.sec) || 0;
+          const secVal = Number(btn.dataset.sec) || 0;
+          state.security.disappearTimers[id] = secVal;
           persistCurrentVault();
+          const targetChat = getMergedChats().find(c => c.id === id);
+          if (targetChat && targetChat.isPeer) {
+            pushMessageToChat(targetChat, { id: 'm_dis_' + Date.now(), sender: 'me', senderName: 'You', type: 'text', text: secVal > 0 ? `Enabled disappearing timer (${secVal >= 3600 ? Math.round(secVal / 3600) + 'h' : secVal + 's'})` : 'Turned off disappearing timer', time: nowTime(), status: 'sent', reactions: [], starred: false });
+          }
           renderModal();
           showToast(state.security.disappearTimers[id] > 0 ? 'Disappearing timer enabled' : 'Disappearing messages off');
         } else if (action === 'open-status') {
           const stId = btn.dataset.id;
           ui.activeStatusId = stId;
-          const net = getNetwork();
-          const netSt = (net.statuses || []).find(x => x.id === stId);
-          if (netSt) {
-            netSt.seenBy = netSt.seenBy || [];
-            if (!netSt.seenBy.includes(activeVaultId)) { netSt.seenBy.push(activeVaultId); saveNetwork(net, 'status_seen'); }
-          } else {
-            const samp = (state.sampleStatuses || []).find(x => x.id === stId);
-            if (samp) { samp.seen = true; persistCurrentVault(); }
-          }
+          markStatusSeen(stId);
           renderStatusViewer();
         } else if (action === 'close-status' || (action === 'close-status-backdrop' && e.target === btn)) {
           clearTimeout(statusAutoTimer);
@@ -8099,8 +8445,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'delete-status') {
           clearTimeout(statusAutoTimer);
           const net = getNetwork();
+          const deadSt = (net.statuses || []).find(x => x.id === btn.dataset.id);
+          if (deadSt && deadSt.photoUrl) deleteMediaFromSupabaseStorage(deadSt.photoUrl);
           net.statuses = (net.statuses || []).filter(x => x.id !== btn.dataset.id);
           saveNetwork(net, 'status_deleted');
+          supaWriteReliable('shavlo_statuses', 'DELETE', `?id=eq.${encodeURIComponent(btn.dataset.id)}`, null);
           ui.activeStatusId = null;
           render();
           showToast('Status deleted');
@@ -8139,8 +8488,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const targetId = btn.dataset.id;
           if (targetId && targetId.startsWith('peer_')) {
             const net = getNetwork();
+            (net.peerChats[targetId] || []).forEach(m => {
+              ['imageUrl', 'photoUrl', 'videoUrl', 'audioUrl', 'fileUrl'].forEach(k => { if (m[k]) deleteMediaFromSupabaseStorage(m[k]); });
+            });
             net.peerChats[targetId] = [];
             saveNetwork(net, 'peer_update');
+            supaWriteReliable('shavlo_messages', 'DELETE', `?room_id=eq.${encodeURIComponent(targetId)}`, null);
             showToast('Chat cleared');
           } else {
             state.chats = state.chats.filter(x => x.id !== targetId);
@@ -8319,6 +8672,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             qrBtn.className = `py-3 rounded-full ${hasAmt ? 'bg-[#C6A76D] text-white shadow-sm' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} text-[13.5px] font-bold hover:opacity-90 transition`;
           }
         } else if (e.target.id === 'message-input') {
+          const curC = getSelectedChat();
+          if (curC) { ui.draftsByChat = ui.draftsByChat || {}; ui.draftsByChat[curC.id] = e.target.value; }
           const hasText = e.target.value.trim().length > 0;
           const sendBtn = document.getElementById('chat-send-btn');
           const micBtn = document.getElementById('chat-mic-btn');
@@ -8397,6 +8752,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           e.preventDefault();
           const fd = new FormData(e.target);
           saveEditedFriendRequest(e.target.dataset.id, fd.get('name'), fd.get('code'));
+        } else if (e.target.id === 'turn-push-form') {
+          const tUrl = (fd.get('turnUrl') || '').toString().trim();
+          const tUsr = (fd.get('turnUser') || '').toString().trim();
+          const tCrd = (fd.get('turnCred') || '').toString().trim();
+          const vKey = (fd.get('vapidKey') || '').toString().trim();
+          setTurnConfig(tUrl, tUsr, tCrd);
+          if (vKey) {
+            try { localStorage.setItem('shavlo_vapid_pub_v1', vKey); } catch (_) {}
+            subscribeToWebPush(vKey).then((ok) => { if (ok) showToast('Background Push enabled'); });
+          }
+          ui.modal = null;
+          render();
+          renderModal();
+          showToast('TURN & Push settings saved');
+        } else if (e.target.id === 'edit-username-form') {
+          const nextName = (fd.get('displayName') || '').toString().trim();
+          if (!nextName) return;
+          state.userProfile.name = nextName;
+          persistCurrentVault();
+          registerCurrentUserInDirectory();
+          ui.modal = null;
+          render();
+          renderModal();
+          showToast('Username updated');
         } else if (e.target.id === 'new-group-form') {
           e.preventDefault();
           const fd = new FormData(e.target);
@@ -8745,6 +9124,28 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             ui.statusDraftPhoto = dataUrl;
             renderModal();
           }, 720);
+        } else if (e.target && e.target.id === 'friend-qr-file-input' && e.target.files && e.target.files[0]) {
+          const qrFile = e.target.files[0];
+          e.target.value = '';
+          (async () => {
+            try {
+              if ('BarcodeDetector' in window) {
+                const det = new BarcodeDetector({ formats: ['qr_code'] });
+                const bmp = await createImageBitmap(qrFile);
+                const codes = await det.detect(bmp);
+                if (codes && codes[0] && codes[0].rawValue) {
+                  const fc = extractFriendCodeFromQr(codes[0].rawValue);
+                  if (fc) {
+                    sendFriendRequest(fc);
+                    return;
+                  }
+                }
+              }
+              showToast('Could not read QR — enter 9-digit code or scan with Phone Camera');
+            } catch (err) {
+              showToast('Scan with Phone Camera or enter 9-digit code');
+            }
+          })();
         } else if (e.target && e.target.id === 'upi-scan-qr-input' && e.target.files && e.target.files[0]) {
           e.target.value = '';
           ui.upiTab = 'send';
@@ -9010,6 +9411,16 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
       }, { passive: true });
       document.addEventListener('touchend', (e) => {
+        const sBtn = e.target && e.target.closest && e.target.closest('#chat-send-btn');
+        if (sBtn) {
+          e.preventDefault();
+          const inp = document.getElementById('message-input');
+          if (inp && inp.value.trim()) {
+            sendTextMessage(inp.value);
+            inp.focus({ preventScroll: true });
+          }
+          return;
+        }
         clearTimeout(lpTimer);
         cancelPrivateHold();
         if (swipingChatEl) {
@@ -9739,6 +10150,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
       function deleteMessageEverywhere(chat, msgId) {
         if (!chat || !msgId) return;
+        const targetList = chat.isPeer ? ((getNetwork().peerChats && getNetwork().peerChats[chat.id]) || []) : (chat.messages || []);
+        const dying = targetList.find(x => x.id === msgId);
+        if (dying) {
+          ['imageUrl', 'photoUrl', 'videoUrl', 'audioUrl', 'fileUrl'].forEach(k => {
+            if (dying[k]) deleteMediaFromSupabaseStorage(dying[k]);
+          });
+        }
         if (chat.isPeer) {
           const net = getNetwork();
           net.peerChats[chat.id] = (net.peerChats[chat.id] || []).filter(x => x.id !== msgId);
@@ -9788,8 +10206,21 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           registerCurrentUserInDirectory();
           syncFromNetwork();
           startSupaPolling();
+          try {
+            const pendingAdd = sessionStorage.getItem('shavlo_pending_add_code');
+            if (pendingAdd) {
+              sessionStorage.removeItem('shavlo_pending_add_code');
+              setTimeout(() => { sendFriendRequest(pendingAdd); }, 650);
+            }
+          } catch (e) {}
         }
       }
+      ['gesturestart', 'gesturechange', 'gestureend'].forEach((evName) => {
+        document.addEventListener(evName, (e) => { e.preventDefault(); }, { passive: false });
+      });
+      document.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches.length > 1) e.preventDefault();
+      }, { passive: false });
       if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
         try { navigator.serviceWorker.register('./sw.js').catch(() => {}); } catch (e) {}
       }
