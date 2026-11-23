@@ -80,7 +80,7 @@
     .thin-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
     .thin-scroll::-webkit-scrollbar-thumb { background: rgba(113, 113, 122, 0.22); border-radius: 9999px; }
     .thin-scroll::-webkit-scrollbar-track { background: transparent; }
-    .thin-scroll { -webkit-overflow-scrolling: touch; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; overscroll-behavior-y: contain; touch-action: pan-y; min-height: 0; contain: layout style; }
+    .thin-scroll { -webkit-overflow-scrolling: touch; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; overscroll-behavior-y: contain; touch-action: pan-y; min-height: 0; }
     button { -webkit-tap-highlight-color: transparent; transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.16s ease, color 0.16s ease, box-shadow 0.18s ease, opacity 0.16s ease; }
     button:active { transform: scale(0.965); }
     .glass-pill {
@@ -593,6 +593,7 @@
 </head>
 <body class="font-sans bg-white dark:bg-[#0B0B0D] text-ink dark:text-[#F4F4F6] selection:bg-brand-100 dark:selection:bg-brand-600/40">
   <div id="app" class="fixed top-0 left-0 right-0 h-full w-full flex flex-col md:flex-row overflow-hidden"></div>
+  <div id="mobile-dock-root"></div>
   <div id="modal-root"></div>
   <div id="call-root"></div>
   <div id="lock-root"></div>
@@ -1455,12 +1456,15 @@
         playSubtleTone('ping');
         if (isIncoming && senderName) {
           showToast(`${senderName} pinged you`);
+          if (document.hidden && typeof showSystemNotif === 'function') {
+            showSystemNotif(senderName, 'Pinged you', 'shavlo-ping-' + chatId, chatId);
+          }
         }
-        render();
+        safeBackgroundRender();
         setTimeout(() => {
           if (ui.ringPingChats && ui.ringPingChats[chatId] && ui.ringPingChats[chatId] <= Date.now()) {
             delete ui.ringPingChats[chatId];
-            render();
+            safeBackgroundRender();
           }
         }, 1500);
       }
@@ -1478,13 +1482,13 @@
         ui.lastPingSentAt[chatId] = now;
         triggerRingPing(chatId, null, false);
         showToast(`Pinged ${target.name}`);
-        if (target.isPeer) {
+        if (target.isPeer || String(target.id || '').startsWith('peer_') || String(target.id || '').startsWith('grp_')) {
           const payload = { roomId: target.id, fromId: activeVaultId, fromName: (state.userProfile && state.userProfile.name) || 'Friend' };
           if (liveChannel) {
             try { liveChannel.postMessage({ type: 'ring_ping', ...payload }); } catch (err) {}
           }
-          if (supaChannel && supaStatus === 'realtime') {
-            try { supaChannel.send({ type: 'broadcast', event: 'ring_ping', payload }); } catch (err) {}
+          if (supaRealtimeChan) {
+            try { supaRealtimeChan.send({ type: 'broadcast', event: 'ring_ping', payload }); } catch (err) {}
           }
         } else {
           // Demo App example: contact pings you back 1.15s later with a live #C6A76D shockwave + haptic
@@ -2047,8 +2051,17 @@
           let ext = extFallback || 'jpg';
           if (typeof dataUrlOrFile === 'string') {
             if (!dataUrlOrFile.startsWith('data:')) return dataUrlOrFile;
-            const res = await fetch(dataUrlOrFile);
-            blob = await res.blob();
+            try {
+              const res = await fetch(dataUrlOrFile);
+              blob = await res.blob();
+            } catch (_) {
+              const parts = dataUrlOrFile.split(',');
+              const mime = (parts[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
+              const bin = atob(parts[1] || '');
+              const arr = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+              blob = new Blob([arr], { type: mime });
+            }
             if (blob.type && blob.type.includes('/')) ext = blob.type.split('/')[1].split(';')[0] || ext;
           } else if (dataUrlOrFile instanceof Blob) {
             blob = dataUrlOrFile;
@@ -2596,6 +2609,26 @@
 
       async function pushUserToSupabase() {
         if (!activeVaultId || !state || !getSupaCfg()) return;
+        try {
+          const fc = String(state.userProfile.friendCode || '').trim();
+          if (fc) {
+            const existing = await supaFetch('shavlo_users', 'GET', `?friend_code=eq.${encodeURIComponent(fc)}&select=vault_id`).catch(() => []);
+            if (Array.isArray(existing) && existing.some(r => r && r.vault_id && r.vault_id !== activeVaultId)) {
+              let fresh = '';
+              for (let attempt = 0; attempt < 5; attempt++) {
+                const cand = String(Math.floor(100000000 + Math.random() * 900000000));
+                const chk = await supaFetch('shavlo_users', 'GET', `?friend_code=eq.${encodeURIComponent(cand)}&select=vault_id`).catch(() => []);
+                if (!Array.isArray(chk) || chk.length === 0) { fresh = cand; break; }
+              }
+              if (fresh) {
+                state.userProfile.friendCode = fresh;
+                persistCurrentVault();
+                registerCurrentUserInDirectory();
+                if (ui.modal === 'friendsHub' || ui.modal === 'friendQrZoom') renderModal();
+              }
+            }
+          }
+        } catch (_) {}
         supaWriteReliable('shavlo_users', 'POST', '', {
           vault_id: activeVaultId,
           friend_code: state.userProfile.friendCode,
@@ -3124,7 +3157,16 @@
               .on('broadcast', { event: 'profile_fast' }, ({ payload }) => {
                 try {
                   const u = payload;
-                  if (!u || !u.vault_id || u.vault_id === activeVaultId) return;
+                  if (!u || !u.vault_id) return;
+                  if (u.vault_id === activeVaultId) {
+                    if (Number(u.updated_at || 0) >= Number(state.userProfile.avatarUpdatedAt || 0)) {
+                      if (u.avatar_url !== undefined) state.userProfile.avatarUrl = u.avatar_url || '';
+                      if (u.name && u.name.trim()) state.userProfile.name = u.name.trim();
+                      state.userProfile.avatarUpdatedAt = Number(u.updated_at || Date.now());
+                      persistCurrentVault();
+                      updateMobileBottomBar();
+                    }
+                  }
                   const net = getNetwork();
                   const prev = net.directory[u.vault_id] || {};
                   net.directory[u.vault_id] = {
@@ -3604,6 +3646,7 @@
           (net.friendships || []).length,
           (net.groups || []).length,
           (net.statuses || []).length,
+          (state.userProfile && state.userProfile.avatarUrl) || '',
           ui.activeCall ? (ui.activeCall.roomId + ':' + ui.activeCall.status) : ''
         ].join('#');
         if (digest === lastSyncedNetDigest) return;
@@ -3648,26 +3691,14 @@
                 listEl.innerHTML = nextList.innerHTML;
                 listEl.scrollTop = prevTop;
               }
-              const curBar = document.getElementById('mobile-dock-wrap');
-              if (curBar) {
-                const tmpBar = document.createElement('div');
-                tmpBar.innerHTML = renderMobileBottomBar();
-                const nextBar = tmpBar.firstElementChild;
-                if (nextBar && curBar.innerHTML !== nextBar.innerHTML) curBar.innerHTML = nextBar.innerHTML;
-              }
+              updateMobileBottomBar();
               patchedAny = true;
             }
           }
           if (patchedAny) return;
         }
         if (patchActiveTabContainerInPlace()) {
-          const curBar = document.getElementById('mobile-dock-wrap');
-          if (curBar) {
-            const tmpBar = document.createElement('div');
-            tmpBar.innerHTML = renderMobileBottomBar();
-            const nextBar = tmpBar.firstElementChild;
-            if (nextBar && curBar.innerHTML !== nextBar.innerHTML) curBar.innerHTML = nextBar.innerHTML;
-          }
+          updateMobileBottomBar();
           return;
         }
         if (ae && ae.id === 'message-input') return;
@@ -4429,6 +4460,7 @@
         showToast(`Left ${grp.name}`);
       }
 
+      function sendFriendRequest(rawCode) { return sendFriendRequestByCode(rawCode); }
       async function sendFriendRequestByCode(rawCode) {
         const code = String(rawCode || '').trim().toUpperCase();
         if (!code) { showToast('Enter a unique code'); return; }
@@ -4956,7 +4988,7 @@
           const pendingAdd = sessionStorage.getItem('shavlo_pending_add_code');
           if (pendingAdd) {
             sessionStorage.removeItem('shavlo_pending_add_code');
-            setTimeout(() => { sendFriendRequest(pendingAdd); }, 450);
+            setTimeout(() => { sendFriendRequestByCode(pendingAdd); }, 450);
           }
         } catch (e) {}
       }
@@ -6411,8 +6443,6 @@
       }
       function renderMobileBottomBar() {
         if (isDockHidden()) return '';
-        const net = getNetwork();
-        const pendingReqs = net.requests.filter(r => r.toId === activeVaultId).length;
         const unreadTotal = getMergedChats().reduce((s, c) => s + (c.unread || 0), 0);
         const unseenUpdates = getActiveStatuses().filter(st => !(st.seen || (Array.isArray(st.seenBy) && st.seenBy.includes(activeVaultId)))).length;
         const items = [
@@ -6429,27 +6459,74 @@
               ${items.map(it => {
                 const active = state.activeNav === it.id;
                 const youPhoto = it.isProfile ? safeImgUrl(state.userProfile.avatarUrl) : '';
-                if (youPhoto) {
+                if (it.isProfile) {
                   return `
-                    <button data-action="nav" data-nav="${it.id}" title="${it.label}" aria-label="${it.label}" class="relative w-[60px] h-[60px] ml-auto mr-0.5 overflow-hidden flex items-center justify-center rounded-[50%] ${active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]'}">
-                      <img src="${youPhoto}" alt="You" class="absolute inset-0 w-full h-full object-cover rounded-[50%]" />
+                    <button type="button" data-action="nav" data-nav="${it.id}" data-dock-btn="${it.id}" data-you-src="${escapeHtml(youPhoto)}" title="${it.label}" aria-label="${it.label}" class="relative h-[56px] px-1 rounded-full overflow-hidden flex items-center justify-center ${youPhoto ? (active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]') : (active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium')}">
+                      <span data-dock-you-inner class="w-full h-full flex items-center justify-center">
+                        ${youPhoto
+                          ? `<img src="${youPhoto}" alt="You" class="absolute inset-0 w-full h-full object-cover rounded-full" />`
+                          : icon('you', 'w-[22px] h-[22px]')
+                        }
+                      </span>
                     </button>
                   `;
                 }
-                const youRoundCls = it.isProfile ? 'w-[60px] h-[60px] ml-auto mr-0.5 rounded-[50%] p-0' : 'h-[56px] px-1 rounded-full';
                 return `
-                  <button data-action="nav" data-nav="${it.id}" title="${it.label}" aria-label="${it.label}" class="relative flex items-center justify-center ${youRoundCls} ${active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}">
-                    ${it.isProfile
-                      ? renderAvatar(getInitial(state.userProfile.name), '', 'w-[28px] h-[28px] text-[12px] ring-1 ' + (active ? 'ring-white/70 dark:ring-ink/70' : 'ring-black/15 dark:ring-white/25'), active ? 'bg-white text-ink dark:bg-ink dark:text-white' : 'bg-brand-500 text-white')
-                      : icon(it.ico, 'w-[22px] h-[22px]')
-                    }
-                    ${it.badge > 0 ? `<span class="absolute -top-1 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full ${active ? 'bg-white text-ink dark:bg-ink dark:text-white' : 'bg-ink text-white dark:bg-white dark:text-ink'} text-[10px] font-extrabold flex items-center justify-center shadow-sm">${it.badge > 99 ? '99+' : it.badge}</span>` : ''}
+                  <button type="button" data-action="nav" data-nav="${it.id}" data-dock-btn="${it.id}" title="${it.label}" aria-label="${it.label}" class="relative flex items-center justify-center h-[56px] px-1 rounded-full ${active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}">
+                    ${icon(it.ico, 'w-[22px] h-[22px]')}
+                    <span data-dock-badge="${it.id}" class="${it.badge > 0 ? '' : 'hidden '}absolute -top-1 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full ${active ? 'bg-white text-ink dark:bg-ink dark:text-white' : 'bg-ink text-white dark:bg-white dark:text-ink'} text-[10px] font-extrabold flex items-center justify-center shadow-sm">${it.badge > 99 ? '99+' : it.badge}</span>
                   </button>
                 `;
               }).join('')}
             </nav>
           </div>
         `;
+      }
+
+      function updateMobileBottomBar() {
+        const root = document.getElementById('mobile-dock-root');
+        if (!root) return;
+        if (!state || !activeVaultId || privateRoomSession || isDockHidden()) {
+          if (root.innerHTML !== '') root.innerHTML = '';
+          return;
+        }
+        const existingNav = document.getElementById('mobile-dock-nav');
+        if (!existingNav) {
+          root.innerHTML = renderMobileBottomBar();
+          return;
+        }
+        const unreadTotal = getMergedChats().reduce((s, c) => s + (c.unread || 0), 0);
+        const unseenUpdates = getActiveStatuses().filter(st => !(st.seen || (Array.isArray(st.seenBy) && st.seenBy.includes(activeVaultId)))).length;
+        const badges = { updates: unseenUpdates, messages: unreadTotal, calls: 0, groups: 0, you: 0 };
+        const youPhoto = safeImgUrl(state.userProfile.avatarUrl);
+        existingNav.querySelectorAll('button[data-dock-btn]').forEach(btn => {
+          const id = btn.getAttribute('data-dock-btn');
+          const active = state.activeNav === id;
+          if (id === 'you') {
+            const wantCls = `relative h-[56px] px-1 rounded-full overflow-hidden flex items-center justify-center ${youPhoto ? (active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]') : (active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium')}`;
+            if (btn.className !== wantCls) btn.className = wantCls;
+            if (btn.getAttribute('data-you-src') !== (youPhoto || '')) {
+              btn.setAttribute('data-you-src', youPhoto || '');
+              const inner = btn.querySelector('[data-dock-you-inner]');
+              if (inner) {
+                inner.innerHTML = youPhoto
+                  ? `<img src="${youPhoto}" alt="You" class="absolute inset-0 w-full h-full object-cover rounded-full" />`
+                  : icon('you', 'w-[22px] h-[22px]');
+              }
+            }
+          } else {
+            const wantCls = `relative flex items-center justify-center h-[56px] px-1 rounded-full ${active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}`;
+            if (btn.className !== wantCls) btn.className = wantCls;
+            const bEl = btn.querySelector(`[data-dock-badge="${id}"]`);
+            if (bEl) {
+              const cnt = badges[id] || 0;
+              const txt = cnt > 99 ? '99+' : String(cnt);
+              if (bEl.textContent !== txt) bEl.textContent = txt;
+              const bCls = `${cnt > 0 ? '' : 'hidden '}absolute -top-1 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full ${active ? 'bg-white text-ink dark:bg-ink dark:text-white' : 'bg-ink text-white dark:bg-white dark:text-ink'} text-[10px] font-extrabold flex items-center justify-center shadow-sm`;
+              if (bEl.className !== bCls) bEl.className = bCls;
+            }
+          }
+        });
       }
 
       // UPDATES TAB — 24-Hour Statuses & Updates
@@ -9082,37 +9159,36 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (ui.modal === 'cropAvatar' && ui.cropAvatar) {
           const ca = ui.cropAvatar;
           const aspect = (ca.imgW || 1) / (ca.imgH || 1);
-          const baseW = aspect >= 1 ? 240 * aspect : 240;
-          const baseH = aspect >= 1 ? 240 : 240 / aspect;
+          const stagePx = 220;
+          const baseW = aspect >= 1 ? stagePx * aspect : stagePx;
+          const baseH = aspect >= 1 ? stagePx : stagePx / aspect;
           inner = `
-            <div class="flex items-center justify-between mb-3">
-              <div>
-                <h3 class="title-display font-bold text-[19px]">Adjust profile photo</h3>
-                <p class="text-[12px] text-muted">Drag to position • Zoom in or out</p>
-              </div>
-              <button type="button" data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
-            </div>
-            <div class="flex justify-center py-3">
-              <div id="crop-stage" style="touch-action:none;" class="relative w-[240px] h-[240px] rounded-full overflow-hidden bg-zinc-950 ring-2 ring-ink/20 dark:ring-white/25 cursor-grab active:cursor-grabbing select-none shadow-lg">
-                <img id="crop-preview-img" src="${safeImgUrl(ca.src)}" alt="Crop preview" draggable="false" style="width:${baseW}px; height:${baseH}px; max-width:none; left:50%; top:50%; transform:translate(calc(-50% + ${ca.x}px), calc(-50% + ${ca.y}px)) scale(${ca.zoom}) rotate(${ca.rotate}deg); transform-origin:center center;" class="absolute pointer-events-none select-none />
-                <div class="pointer-events-none absolute inset-0 rounded-full ring-1 ring-inset ring-white/35"></div>
-              </div>
-            </div>
-            <div class="mt-3 space-y-3">
-              <div class="flex items-center gap-2.5 px-2">
-                <button type="button" data-action="crop-zoom-step" data-delta="-0.2" title="Zoom out" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-900 text-ink dark:text-white font-bold text-[16px] flex items-center justify-center shrink-0 hover:bg-black/10 dark:hover:bg-white/15 transition">−</button>
-                <input id="crop-zoom-slider" type="range" min="1" max="3.5" step="0.02" value="${ca.zoom}" class="flex-1 accent-[#09090C] dark:accent-white cursor-pointer" />
-                <button type="button" data-action="crop-zoom-step" data-delta="0.2" title="Zoom in" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-900 text-ink dark:text-white font-bold text-[16px] flex items-center justify-center shrink-0 hover:bg-black/10 dark:hover:bg-white/15 transition">+</button>
-              </div>
-              <div class="flex items-center justify-between gap-2 pt-1">
-                <div class="flex items-center gap-2">
-                  <button type="button" data-action="crop-rotate" class="px-3 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold text-ink dark:text-white hover:bg-black/10 dark:hover:bg-white/15 transition">Rotate 90°</button>
-                  <button type="button" data-action="crop-reset" class="px-3 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold text-muted hover:text-ink dark:hover:text-white transition">Reset</button>
+            <div class="w-full min-w-0 space-y-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h3 class="title-display font-bold text-[18px] leading-tight text-ink dark:text-white">Adjust profile photo</h3>
+                  <p class="text-[12px] text-muted mt-0.5">Drag to position • Zoom in or out</p>
                 </div>
-                <div class="flex items-center gap-2">
-                  <button type="button" data-action="close-modal" class="px-3.5 py-2 rounded-full text-[13px] font-semibold text-muted hover:text-ink">Cancel</button>
-                  <button type="button" data-action="apply-avatar-crop" class="px-4 py-2 rounded-full bg-ink dark:bg-white text-white dark:text-ink text-[13px] font-semibold shadow-sm transition">Save Photo</button>
+                <button type="button" data-action="close-modal" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-800 text-muted hover:text-ink dark:hover:text-white flex items-center justify-center shrink-0 transition">${icon('close', 'w-4 h-4')}</button>
+              </div>
+              <div class="flex justify-center py-1">
+                <div id="crop-stage" style="touch-action:none;" class="relative w-[220px] h-[220px] rounded-full overflow-hidden bg-zinc-950 ring-2 ring-[#C6A76D]/50 cursor-grab active:cursor-grabbing select-none shadow-lg shrink-0">
+                  <img id="crop-preview-img" src="${safeImgUrl(ca.src)}" alt="Crop preview" draggable="false" style="width:${baseW}px; height:${baseH}px; max-width:none; left:50%; top:50%; transform:translate(calc(-50% + ${ca.x}px), calc(-50% + ${ca.y}px)) scale(${ca.zoom}) rotate(${ca.rotate}deg); transform-origin:center center;" class="absolute pointer-events-none select-none" />
+                  <div class="pointer-events-none absolute inset-0 rounded-full ring-1 ring-inset ring-white/35"></div>
                 </div>
+              </div>
+              <div class="flex items-center gap-2.5 w-full min-w-0">
+                <button type="button" data-action="crop-zoom-step" data-delta="-0.2" title="Zoom out" class="w-9 h-9 rounded-full bg-surface dark:bg-zinc-900 text-ink dark:text-white font-bold text-[16px] flex items-center justify-center shrink-0 hover:bg-black/10 dark:hover:bg-white/15 transition">−</button>
+                <input id="crop-zoom-slider" type="range" min="1" max="3.5" step="0.02" value="${ca.zoom}" class="flex-1 min-w-0 w-full accent-[#09090C] dark:accent-white cursor-pointer" />
+                <button type="button" data-action="crop-zoom-step" data-delta="0.2" title="Zoom in" class="w-9 h-9 rounded-full bg-surface dark:bg-zinc-900 text-ink dark:text-white font-bold text-[16px] flex items-center justify-center shrink-0 hover:bg-black/10 dark:hover:bg-white/15 transition">+</button>
+              </div>
+              <div class="flex items-center justify-center gap-2">
+                <button type="button" data-action="crop-rotate" class="px-3.5 py-2 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold whitespace-nowrap text-ink dark:text-white hover:bg-black/10 dark:hover:bg-white/15 transition">Rotate 90°</button>
+                <button type="button" data-action="crop-reset" class="px-3.5 py-2 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold whitespace-nowrap text-muted hover:text-ink dark:hover:text-white transition">Reset</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2.5 pt-1">
+                <button type="button" data-action="close-modal" class="w-full py-2.5 rounded-full bg-surface dark:bg-zinc-900 text-[13.5px] font-semibold text-muted hover:text-ink dark:hover:text-white transition">Cancel</button>
+                <button type="button" data-action="apply-avatar-crop" class="w-full py-2.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-bold shadow-sm transition">Save Photo</button>
               </div>
             </div>
           `;
@@ -9120,9 +9196,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
         const isBottomSheet = (ui.modal === 'photoPicker' || ui.modal === 'upi');
         root.innerHTML = `
-          <div data-action="close-modal-backdrop" class="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm flex ${isBottomSheet ? 'items-end justify-center p-0 sm:items-center sm:p-4' : 'items-center justify-center p-4'}">
-            <div class="glass-modal ${isBottomSheet ? (isSameOpenModal ? '' : 'animate-slide-up ') + 'w-full max-w-lg rounded-t-[36px] rounded-b-none sm:rounded-[34px] max-h-[78dvh] overflow-y-auto thin-scroll px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6' : (isSameOpenModal ? '' : 'glass-pop ') + 'w-full max-w-md max-h-[86dvh] overflow-y-auto thin-scroll p-5 sm:p-6'}">
-              ${inner}
+          <div data-action="close-modal-backdrop" class="fixed inset-0 z-50 bg-black/25 backdrop-blur-sm flex ${isBottomSheet ? 'items-end justify-center p-0 sm:items-center sm:p-4' : 'items-center justify-center p-4'} overflow-hidden">
+            <div class="glass-modal overflow-hidden ${isBottomSheet ? (isSameOpenModal ? '' : 'animate-slide-up ') + 'w-full max-w-lg rounded-t-[36px] rounded-b-none sm:rounded-[34px]' : (isSameOpenModal ? '' : 'glass-pop ') + 'w-[min(100%,420px)] max-w-full'}">
+              <div class="${isBottomSheet ? 'max-h-[78dvh] overflow-y-auto thin-scroll px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6' : 'max-h-[86dvh] overflow-y-auto thin-scroll p-5 sm:p-6'}">
+                ${inner}
+              </div>
             </div>
           </div>
         `;
@@ -9360,12 +9438,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         const app = document.getElementById('app');
         if (privateRoomSession) {
           app.innerHTML = renderPrivateRoomChat();
+          updateMobileBottomBar();
           document.getElementById('modal-root').innerHTML = '';
           document.getElementById('call-root').innerHTML = '';
           return;
         }
         if (!state || !activeVaultId) {
           app.innerHTML = renderAuthScreen();
+          updateMobileBottomBar();
           document.getElementById('modal-root').innerHTML = '';
           document.getElementById('call-root').innerHTML = '';
           return;
@@ -9389,9 +9469,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ${renderDesktopSidebar()}
           <div class="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
             ${mainView}
-            ${renderMobileBottomBar()}
           </div>
         `;
+        updateMobileBottomBar();
 
         Object.keys(savedScrolls).forEach(key => {
           const el = app.querySelector(`[data-scroll-host="${key}"]`);
@@ -11601,7 +11681,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   stopQrScanner();
                   ui.modal = null;
                   renderModal();
-                  sendFriendRequest(fc);
+                  sendFriendRequestByCode(fc);
                   return;
                 }
               }
@@ -12427,7 +12507,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         const img = new Image();
         img.onload = () => {
           const outSize = 512;
-          const stageSize = 240;
+          const stageSize = 220;
           const ratio = outSize / stageSize;
           const canvas = document.createElement('canvas');
           canvas.width = outSize;
@@ -12452,24 +12532,25 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.modal = null;
           persistCurrentVault();
           pruneExpiredLocalData();
-        hydrateFromIDB();
-        registerCurrentUserInDirectory();
+          hydrateFromIDB();
+          registerCurrentUserInDirectory();
           render();
-          showToast('Profile photo updated');
-          uploadMediaToSupabaseStorage(localDataUrl, 'avatars', 'jpg').then((cdnUrl) => {
+          updateMobileBottomBar();
+          showToast(getSupaCfg() ? 'Uploading profile photo...' : 'Profile photo updated');
+          uploadMediaToSupabaseStorage(localDataUrl, 'avatars', 'jpg').then(async (cdnUrl) => {
             if (cdnUrl && /^https?:/i.test(cdnUrl)) {
               if (prevAvatarUrl && prevAvatarUrl !== cdnUrl) deleteMediaFromSupabaseStorage(prevAvatarUrl);
               state.userProfile.avatarUrl = cdnUrl;
               state.userProfile.avatarUpdatedAt = Date.now();
               persistCurrentVault();
-              pruneExpiredLocalData();
-        hydrateFromIDB();
-        registerCurrentUserInDirectory();
-              pushUserToSupabase();
+              registerCurrentUserInDirectory();
+              await pushUserToSupabase();
               broadcastProfileFast();
               render();
+              updateMobileBottomBar();
+              showToast('Profile photo synced live');
             } else {
-              pushUserToSupabase();
+              await pushUserToSupabase();
               broadcastProfileFast();
             }
           }).catch(() => {});
@@ -12724,7 +12805,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             const pendingAdd = sessionStorage.getItem('shavlo_pending_add_code');
             if (pendingAdd) {
               sessionStorage.removeItem('shavlo_pending_add_code');
-              setTimeout(() => { sendFriendRequest(pendingAdd); }, 650);
+              setTimeout(() => { sendFriendRequestByCode(pendingAdd); }, 650);
             }
           } catch (e) {}
         }
@@ -12900,7 +12981,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   stopQrScanner();
                   ui.modal = null;
                   renderModal();
-                  sendFriendRequest(fc);
+                  sendFriendRequestByCode(fc);
                   return;
                 }
               }
