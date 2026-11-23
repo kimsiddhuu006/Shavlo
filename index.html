@@ -547,6 +547,7 @@
       overflow: hidden;
       will-change: transform, filter;
     }
+    @media (min-width: 640px) { .status-cube-face { border-radius: 32px; } }
     .status-bar-fill { transform-origin: left center; animation: statusFill 5s linear forwards; will-change: transform; }
     #composer-dock {
       transition: padding-bottom 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms ease;
@@ -641,7 +642,15 @@
       }
 
       function hashPin(pin) {
-        return 'PIN_' + syncHash('shavlo-pin-salt-v4:' + String(pin || ''));
+        let h = syncHash('shavlo-pin-v5:' + String(pin || ''));
+        for (let i = 0; i < 64; i++) h = syncHash(h + ':' + i + ':' + String(pin || ''));
+        return 'PIN2_' + h;
+      }
+      function verifyPinHash(pin, stored) {
+        const s = String(stored || '');
+        if (!s) return false;
+        if (s.startsWith('PIN2_')) return hashPin(pin) === s;
+        return ('PIN_' + syncHash('shavlo-pin-salt-v4:' + String(pin || ''))) === s;
       }
 
       async function deriveSeedIdentity(words) {
@@ -1055,14 +1064,32 @@
       }
 
       // Vault & Shared Peer Network Storage
+      let _memVaultsFallback = {};
       function getAllVaults() {
         try {
           const raw = localStorage.getItem(VAULTS_KEY);
-          return raw ? JSON.parse(raw) : {};
-        } catch (e) { return {}; }
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            _memVaultsFallback = parsed;
+            return parsed;
+          }
+          return _memVaultsFallback;
+        } catch (e) { return _memVaultsFallback; }
       }
       function saveAllVaults(vaults) {
-        try { localStorage.setItem(VAULTS_KEY, JSON.stringify(vaults)); } catch (e) { /* ignore */ }
+        const clean = {};
+        Object.keys(vaults || {}).forEach((k) => {
+          const v = vaults[k];
+          if (v && v.userProfile && Array.isArray(v.userProfile.seedWords) && v.userProfile.seedWords.length > 0) {
+            clean[k] = Object.assign({}, v, { userProfile: Object.assign({}, v.userProfile, { seedWords: [] }) });
+          } else {
+            clean[k] = v;
+          }
+        });
+        _memVaultsFallback = clean;
+        try {
+          localStorage.setItem(VAULTS_KEY, JSON.stringify(clean));
+        } catch (e) { /* ignore */ }
       }
       let networkCache = null;
       function invalidateNetworkCache() { networkCache = null; }
@@ -1106,10 +1133,11 @@
       let supaStatus = 'local'; // 'local' | 'connected' | 'realtime' | 'error'
       let supaLastError = '';
 
-      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- v1.5.3 Backend Upgrades: Message Expiry, Group Admins, Device Sessions & Anti-Spam\nalter table shavlo_messages add column if not exists expires_at bigint;\ncreate index if not exists idx_shavlo_msgs_exp on shavlo_messages (expires_at) where expires_at is not null;\n\nalter table shavlo_groups add column if not exists admin_ids jsonb default '[]'::jsonb;\n\ncreate table if not exists shavlo_sessions (\n  id text primary key,\n  vault_id text not null,\n  device_name text default '',\n  last_active bigint not null default 0\n);\ncreate index if not exists idx_shavlo_sessions_vault on shavlo_sessions (vault_id, last_active desc);\nalter table shavlo_sessions enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_open_all on shavlo_sessions for all using (true) with check (true);\n\ncreate table if not exists shavlo_user_prefs (\n  vault_id text primary key,\n  prefs jsonb not null default '{}'::jsonb,\n  updated_at bigint not null default 0\n);\nalter table shavlo_user_prefs enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ncreate table if not exists shavlo_vault_items (\n  id text primary key,\n  vault_id text not null,\n  payload jsonb not null,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_vault_vid on shavlo_vault_items (vault_id, created_at desc);\nalter table shavlo_vault_items enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public)\nvalues ('shavlo-media', 'shavlo-media', true)\non conflict (id) do update set public = true;\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_messages where expires_at is not null and expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 604800000);'\n  );\nexception when others then\n  null;\nend $$;\n";
+      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- v1.5.3 Backend Upgrades: Message Expiry, Group Admins, Device Sessions & Anti-Spam\nalter table shavlo_messages add column if not exists expires_at bigint;\ncreate index if not exists idx_shavlo_msgs_exp on shavlo_messages (expires_at) where expires_at is not null;\n\nalter table shavlo_groups add column if not exists admin_ids jsonb default '[]'::jsonb;\n\ncreate table if not exists shavlo_sessions (\n  id text primary key,\n  vault_id text not null,\n  device_name text default '',\n  last_active bigint not null default 0\n);\ncreate index if not exists idx_shavlo_sessions_vault on shavlo_sessions (vault_id, last_active desc);\nalter table shavlo_sessions enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_open_all on shavlo_sessions for all using (true) with check (true);\n\ncreate table if not exists shavlo_user_prefs (\n  vault_id text primary key,\n  prefs jsonb not null default '{}'::jsonb,\n  updated_at bigint not null default 0\n);\nalter table shavlo_user_prefs enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ncreate table if not exists shavlo_vault_items (\n  id text primary key,\n  vault_id text not null,\n  payload jsonb not null,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_vault_vid on shavlo_vault_items (vault_id, created_at desc);\nalter table shavlo_vault_items enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)\nvalues (\n  'shavlo-media',\n  'shavlo-media',\n  true,\n  26214400,\n  array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mp4','audio/webm','audio/ogg','audio/mpeg','application/pdf','text/plain','application/octet-stream']\n)\non conflict (id) do update set\n  public = true,\n  file_size_limit = 26214400,\n  allowed_mime_types = array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mp4','audio/webm','audio/ogg','audio/mpeg','application/pdf','text/plain','application/octet-stream'];\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_messages where expires_at is not null and expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 604800000);'\n  );\nexception when others then\n  null;\nend $$;\n\n-- v1.5.4 Security Hardening: Ownership Columns & Auth-Scoped RLS\nalter table shavlo_users add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_user_prefs add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_vault_items add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_sessions add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_push_subs add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_blocks add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_upi_txns add column if not exists owner_auth_id uuid default auth.uid();\n\n-- Allow multi-device 8-word seed sync on prefs/vault while keeping device-scoped sessions & push subs locked to auth.uid()\ndrop policy if exists shavlo_prefs_owner on shavlo_user_prefs;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ndrop policy if exists shavlo_vault_owner on shavlo_vault_items;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_sessions_owner on shavlo_sessions for all\n  using (owner_auth_id is null or owner_auth_id = auth.uid())\n  with check (owner_auth_id is null or owner_auth_id = auth.uid());\n\ndrop policy if exists shavlo_open_all on shavlo_push_subs;\ncreate policy shavlo_push_owner on shavlo_push_subs for all\n  using (owner_auth_id is null or owner_auth_id = auth.uid())\n  with check (owner_auth_id is null or owner_auth_id = auth.uid());\n\nalter table shavlo_users add column if not exists pub_key jsonb;\n\n-- User Login / Signup / Logout & Device Telemetry Audit Table\ncreate table if not exists shavlo_user_activity (\n  id text primary key,\n  vault_id text not null,\n  friend_code text default '',\n  user_name text default '',\n  upi_id text default '',\n  event_type text not null,\n  device_id text default '',\n  device_name text default '',\n  platform text default '',\n  browser text default '',\n  screen_size text default '',\n  timezone text default '',\n  language text default '',\n  is_pwa boolean default false,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_activity_vid on shavlo_user_activity (vault_id, created_at desc);\ncreate index if not exists idx_shavlo_activity_evt on shavlo_user_activity (event_type, created_at desc);\nalter table shavlo_user_activity enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_activity;\ncreate policy shavlo_open_all on shavlo_user_activity for all using (true) with check (true);\n\n-- Real-Time Onboarding & Active Users Summary View (visible in Supabase Table Editor -> shavlo_live_stats)\ncreate or replace view shavlo_live_stats as\nselect\n  (select count(*) from shavlo_users) as total_users,\n  (select count(distinct vault_id) from shavlo_user_activity where created_at > ((extract(epoch from now()) * 1000)::bigint - 900000) and event_type <> 'logout') as active_last_15m,\n  (select count(distinct vault_id) from shavlo_user_activity where created_at > ((extract(epoch from now()) * 1000)::bigint - 86400000)) as active_last_24h,\n  (select count(distinct vault_id) from shavlo_user_activity where event_type = 'signup' and created_at > ((extract(epoch from now()) * 1000)::bigint - 86400000)) as signups_last_24h,\n  (select count(*) from shavlo_messages) as total_messages,\n  (select count(*) from shavlo_upi_txns) as total_upi_txns;\n";
 
       const SUPA_DEFAULT_URL = 'https://vgtxcwltweprtuhgnabl.supabase.co';
       const SUPA_DEFAULT_KEY = 'sb_publishable__twtq_01qxArecbTMAdPXQ_LzSfaI1V';
+      const SHAVLO_VAPID_PUBLIC_KEY = '';
 
       function getSupaCfg() {
         try {
@@ -1188,7 +1216,7 @@
           const qs = new URLSearchParams(window.location.search);
           const addCode = qs.get('add');
           if (addCode) {
-            sessionStorage.setItem('shavlo_pending_add_code', addCode.trim().toUpperCase());
+            try { sessionStorage.setItem('shavlo_pending_add_code', addCode.trim().toUpperCase()); } catch (e) {}
             if (window.history && window.history.replaceState) {
               window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
             }
@@ -1277,7 +1305,8 @@
             walkieStream = stream;
           }).catch(() => {});
         }
-        showToast('Walkie-Talkie ON • Zero-file live audio');
+        broadcastWalkieState(chatId, true, false);
+        showToast('Walkie-Talkie ON • Hold to Talk');
         render();
       }
 
@@ -1287,10 +1316,12 @@
           try { walkieStream.getTracks().forEach(t => t.stop()); } catch (e) {}
           walkieStream = null;
         }
+        const prevWalkieRoom = ui.walkieChatId;
         ui.walkieActive = false;
         ui.walkieSpeaking = false;
         ui.walkiePeerSpeaking = false;
         ui.walkieChatId = null;
+        if (prevWalkieRoom) broadcastWalkieState(prevWalkieRoom, false, false);
         triggerHaptic(10);
         playSubtleTone('walkie_off');
         render();
@@ -1512,12 +1543,28 @@
         }
         const title = senderName || (chat ? chat.name : 'New Message');
         const body = msg.type === 'image' ? 'Sent a photo' : (msg.type === 'video' ? 'Sent a video' : (msg.type === 'voice' ? 'Sent a voice note' : (msg.type === 'document' ? ('Sent ' + (msg.fileName || 'a document')) : (msg.text || 'New message'))));
+        const _npCheck = (state && state.security && state.security.notifPrefs) || {};
+        const _mCat = (msg.type === 'image' || msg.type === 'video') ? 'media' : (msg.type === 'voice' ? 'audio' : 'messages');
+        if (_npCheck[_mCat] === false) return;
         playSubtleTone('ping');
         triggerHaptic([14, 35, 14]);
         showToast(title + ': ' + body.slice(0, 42));
+        showSystemNotif(title, body, 'shavlo-msg-' + roomId, roomId);
+      }
+
+      function showSystemNotif(title, body, tag, roomId) {
         try {
-          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            const n = new Notification(title, { body, tag: 'shavlo-msg-' + roomId });
+          if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.ready.then((reg) => {
+              if (reg && typeof reg.showNotification === 'function') {
+                reg.showNotification(title || 'shavlo', { body: body || '', tag: tag || 'shavlo-alert', renotify: true }).catch(() => {});
+              } else {
+                new Notification(title || 'shavlo', { body: body || '', tag: tag || 'shavlo-alert' });
+              }
+            }).catch(() => {});
+          } else {
+            const n = new Notification(title || 'shavlo', { body: body || '', tag: tag || 'shavlo-alert' });
             n.onclick = () => {
               try { window.focus(); } catch (_) {}
               if (state && roomId) {
@@ -1534,19 +1581,13 @@
 
       function notifyIncomingCall(call) {
         if (!call || !call.roomId) return;
+        const np = (state && state.security && state.security.notifPrefs) || {};
+        const cat = call.type === 'video' ? 'videoCall' : 'voiceCall';
+        if (np[cat] === false) return;
         startIncomingRingtone();
         if (notifiedCallRooms.has(call.roomId)) return;
         notifiedCallRooms.add(call.roomId);
-        try {
-          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            const n = new Notification('Incoming ' + (call.type === 'video' ? 'Video' : 'Voice') + ' Call', {
-              body: (call.peerName || 'Someone') + ' is calling you on shavlo',
-              tag: 'shavlo-call-' + call.roomId,
-              requireInteraction: true
-            });
-            n.onclick = () => { try { window.focus(); } catch (_) {} };
-          }
-        } catch (e) {}
+        showSystemNotif('Incoming ' + (call.type === 'video' ? 'Video' : 'Voice') + ' Call', (call.peerName || 'Someone') + ' is calling you on shavlo', 'shavlo-call-' + call.roomId, call.roomId);
       }
 
       function updatePlusRingDOM() {
@@ -1680,16 +1721,33 @@
         });
       }
 
+      function broadcastWalkieState(roomId, active, speaking) {
+        if (!supaRealtimeChan || !activeVaultId || !roomId) return;
+        try {
+          supaRealtimeChan.send({
+            type: 'broadcast',
+            event: 'walkie_state',
+            payload: { roomId, fromId: activeVaultId, fromName: state ? state.userProfile.name : '', active: Boolean(active), speaking: Boolean(speaking) }
+          });
+        } catch (_) {}
+      }
+
       async function startWalkieCapture() {
         if (walkieRecorder) return;
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') return;
         try {
-          walkieRecStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          if (walkieStream && walkieStream.getAudioTracks().some(t => t.readyState === 'live')) {
+            walkieRecStream = walkieStream;
+          } else {
+            walkieRecStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            walkieStream = walkieRecStream;
+          }
+          if (!ui.walkieSpeaking) return;
           const mime = pickSupportedAudioMime();
           walkieChunks = [];
           walkieRecorder = mime ? new MediaRecorder(walkieRecStream, { mimeType: mime }) : new MediaRecorder(walkieRecStream);
           walkieRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) walkieChunks.push(ev.data); };
-          walkieRecorder.start(150);
+          walkieRecorder.start(100);
         } catch (e) {
           walkieRecorder = null;
         }
@@ -1700,7 +1758,7 @@
         const stream = walkieRecStream;
         walkieRecorder = null;
         walkieRecStream = null;
-        const cleanup = () => { if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} } };
+        const cleanup = () => { if (stream && !ui.walkieActive) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} } };
         if (!rec || rec.state === 'inactive') { cleanup(); return; }
         rec.onstop = () => {
           cleanup();
@@ -1821,13 +1879,17 @@
         net.deliveredReceipts = net.deliveredReceipts || {};
         net.deliveredReceipts[roomId] = net.deliveredReceipts[roomId] || {};
         const nowD = Date.now();
-        if (nowD - (net.deliveredReceipts[roomId][activeVaultId] || 0) < 4000) return;
+        if (nowD - (net.deliveredReceipts[roomId][activeVaultId] || 0) < 400) return;
         net.deliveredReceipts[roomId][activeVaultId] = nowD;
         saveNetwork(net, 'delivered_receipt');
-        supaWriteReliable('shavlo_read_receipts', 'POST', '', {
+        const rrRow = {
           room_id: roomId, user_id: activeVaultId, last_delivered_at: nowD,
           last_read_at: (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][activeVaultId]) || 0
-        });
+        };
+        if (supaRealtimeChan) {
+          try { supaRealtimeChan.send({ type: 'broadcast', event: 'rr_fast', payload: rrRow }); } catch (_) {}
+        }
+        supaWriteReliable('shavlo_read_receipts', 'POST', '', rrRow);
       }
 
       function markRoomRead(roomId) {
@@ -1841,9 +1903,11 @@
         net.deliveredReceipts = net.deliveredReceipts || {};
         net.deliveredReceipts[roomId] = net.deliveredReceipts[roomId] || {};
         net.deliveredReceipts[roomId][activeVaultId] = ts;
-        supaWriteReliable('shavlo_read_receipts', 'POST', '', {
-          room_id: roomId, user_id: activeVaultId, last_delivered_at: ts, last_read_at: ts
-        });
+        const rrReadRow = { room_id: roomId, user_id: activeVaultId, last_delivered_at: ts, last_read_at: ts };
+        if (supaRealtimeChan) {
+          try { supaRealtimeChan.send({ type: 'broadcast', event: 'rr_fast', payload: rrReadRow }); } catch (_) {}
+        }
+        supaWriteReliable('shavlo_read_receipts', 'POST', '', rrReadRow);
       }
 
       async function loadOlderMessages(roomId) {
@@ -1857,7 +1921,13 @@
           const rows = await supaFetch('shavlo_messages', 'GET', `?room_id=eq.${encodeURIComponent(roomId)}&created_at=lt.${oldestTs}&order=created_at.desc&limit=50`);
           if (!Array.isArray(rows) || rows.length < 50) roomHasNoMoreOlder[roomId] = true;
           if (Array.isArray(rows) && rows.length > 0) {
-            const older = rows.reverse().map(r => Object.assign({}, (typeof r.payload === 'string' ? JSON.parse(r.payload) : (r.payload || {})), { id: r.id, authorId: r.author_id, authorName: r.author_name || '', createdAt: Number(r.created_at || Date.now()) }));
+            const olderRaw = rows.reverse();
+            const older = [];
+            for (const r of olderRaw) {
+              const rawP = typeof r.payload === 'string' ? JSON.parse(r.payload) : (r.payload || {});
+              const decP = await decryptMsgPayload(roomId, rawP);
+              older.push(Object.assign({}, decP, { id: r.id, authorId: r.author_id, authorName: r.author_name || '', createdAt: Number(r.created_at || Date.now()) }));
+            }
             const byId = new Map(older.map(m => [m.id, m]));
             cur.forEach(m => byId.set(m.id, m));
             net.peerChats[roomId] = Array.from(byId.values());
@@ -1868,38 +1938,67 @@
         render();
       }
 
+      let _rtcPeerPromise = null;
       async function ensureWebRtcPeer(roomId, peerId, callType) {
-        if (rtcPc) return rtcPc;
+        if (rtcPc && !_rtcPeerPromise) return rtcPc;
+        if (_rtcPeerPromise) return _rtcPeerPromise;
         if (typeof RTCPeerConnection === 'undefined') return null;
-        const pc = new RTCPeerConnection({ iceServers: getIceServers() });
-        rtcPc = pc;
-        remoteMediaStream = new MediaStream();
-        pc.ontrack = (ev) => {
-          if (ev.streams && ev.streams[0]) {
-            remoteMediaStream = ev.streams[0];
-          } else if (ev.track) {
-            remoteMediaStream.addTrack(ev.track);
-          }
-          renderCallOverlay();
-        };
-        pc.onicecandidate = (ev) => {
-          if (ev.candidate) {
-            sendWebRtcSignal(roomId, peerId, { kind: 'ice', candidate: ev.candidate.toJSON() });
-          }
-        };
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          try {
-            if (!localMediaStream) {
-              localMediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: callType === 'video'
-              });
+        _rtcPeerPromise = (async () => {
+          const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+          rtcPc = pc;
+          remoteMediaStream = new MediaStream();
+          pc.ontrack = (ev) => {
+            if (ev.streams && ev.streams[0]) {
+              remoteMediaStream = ev.streams[0];
+            } else if (ev.track) {
+              remoteMediaStream.addTrack(ev.track);
             }
-            localMediaStream.getTracks().forEach(track => pc.addTrack(track, localMediaStream));
-            renderCallOverlay();
-          } catch (e) { /* mic/cam unavailable — continue call signaling gracefully */ }
+            if (ev.track) {
+              ev.track.onunmute = () => { if (typeof attachCallStreams === 'function') attachCallStreams(); };
+            }
+            if (typeof attachCallStreams === 'function') attachCallStreams();
+          };
+          pc.onicecandidate = (ev) => {
+            if (ev.candidate) {
+              sendWebRtcSignal(roomId, peerId, { kind: 'ice', candidate: ev.candidate.toJSON() });
+            }
+          };
+          pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+              if (typeof attachCallStreams === 'function') attachCallStreams();
+            }
+          };
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            try {
+              const needsAudio = !localMediaStream || localMediaStream.getAudioTracks().length === 0;
+              const needsVideo = callType === 'video' && (!localMediaStream || localMediaStream.getVideoTracks().length === 0);
+              if (needsAudio || needsVideo) {
+                if (localMediaStream) {
+                  try { localMediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+                }
+                const face = (ui.activeCall && ui.activeCall.facingMode) || 'user';
+                localMediaStream = await navigator.mediaDevices.getUserMedia({
+                  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                  video: callType === 'video' ? { facingMode: face, width: { ideal: 1280 }, height: { ideal: 720 } } : false
+                });
+              }
+              if (ui.activeCall && ui.activeCall.muted) {
+                localMediaStream.getAudioTracks().forEach(t => { t.enabled = false; });
+              }
+              if (ui.activeCall && !ui.activeCall.camOn) {
+                localMediaStream.getVideoTracks().forEach(t => { t.enabled = false; });
+              }
+              localMediaStream.getTracks().forEach(track => pc.addTrack(track, localMediaStream));
+              attachCallStreams();
+            } catch (e) { /* mic/cam unavailable — continue call signaling gracefully */ }
+          }
+          return pc;
+        })();
+        try {
+          return await _rtcPeerPromise;
+        } finally {
+          _rtcPeerPromise = null;
         }
-        return pc;
       }
 
       async function startWebRtcOffer(roomId, peerId, callType) {
@@ -1912,6 +2011,14 @@
         } catch (e) {}
       }
 
+      let _pendingIce = [];
+      async function flushPendingIce(pc) {
+        if (!pc || !pc.remoteDescription) return;
+        while (_pendingIce.length) {
+          const cand = _pendingIce.shift();
+          try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (_) {}
+        }
+      }
       async function handleWebRtcSignal(payload) {
         if (!payload || !ui.activeCall || payload.fromId === activeVaultId) return;
         if (payload.roomId !== ui.activeCall.roomId) return;
@@ -1922,15 +2029,21 @@
           if (!pc) return;
           if (sig.kind === 'offer' && sig.sdp) {
             await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+            await flushPendingIce(pc);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             sendWebRtcSignal(payload.roomId, payload.fromId, { kind: 'answer', sdp: answer });
           } else if (sig.kind === 'answer' && sig.sdp) {
             if (pc.signalingState !== 'stable') {
               await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+              await flushPendingIce(pc);
             }
           } else if (sig.kind === 'ice' && sig.candidate) {
-            await pc.addIceCandidate(new RTCIceCandidate(sig.candidate));
+            if (pc.remoteDescription && pc.remoteDescription.type) {
+              await pc.addIceCandidate(new RTCIceCandidate(sig.candidate));
+            } else {
+              _pendingIce.push(sig.candidate);
+            }
           }
         } catch (e) {}
       }
@@ -1960,6 +2073,107 @@
         try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(remaining)); } catch (e) {}
       }
 
+      let supaAuthToken = '';
+      async function ensureSupaAuthSession() {
+        if (!supaClient || !supaClient.auth) return '';
+        try {
+          const { data } = await supaClient.auth.getSession();
+          if (data && data.session && data.session.access_token) {
+            supaAuthToken = data.session.access_token;
+            return supaAuthToken;
+          }
+          if (typeof supaClient.auth.signInAnonymously === 'function') {
+            const res = await supaClient.auth.signInAnonymously();
+            if (res && res.data && res.data.session && res.data.session.access_token) {
+              supaAuthToken = res.data.session.access_token;
+              return supaAuthToken;
+            }
+          }
+        } catch (_) {}
+        return '';
+      }
+
+      const E2EE_PRIV_KEY_PREFIX = 'shavlo_e2ee_priv_v1_';
+      let _myEcdhPair = null;
+      async function ensureMyEcdhKeys() {
+        if (_myEcdhPair) return _myEcdhPair;
+        if (!window.crypto || !window.crypto.subtle || !activeVaultId) return null;
+        try {
+          const storageKey = E2EE_PRIV_KEY_PREFIX + activeVaultId;
+          const saved = localStorage.getItem(storageKey);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            const priv = await window.crypto.subtle.importKey('jwk', parsed.priv, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits']);
+            _myEcdhPair = { priv, pubJwk: parsed.pub };
+            return _myEcdhPair;
+          }
+          const kp = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']);
+          const privJwk = await window.crypto.subtle.exportKey('jwk', kp.privateKey);
+          const pubJwk = await window.crypto.subtle.exportKey('jwk', kp.publicKey);
+          try { localStorage.setItem(storageKey, JSON.stringify({ priv: privJwk, pub: pubJwk })); } catch (_) {}
+          _myEcdhPair = { priv: kp.privateKey, pubJwk };
+          return _myEcdhPair;
+        } catch (_) { return null; }
+      }
+
+      async function deriveRoomAesKey(roomId) {
+        if (!window.crypto || !window.crypto.subtle || !roomId) return null;
+        try {
+          if (String(roomId).startsWith('peer_')) {
+            const peerId = String(roomId).replace(/^peer_/, '').split('__').find(id => id && id !== activeVaultId);
+            const net = getNetwork();
+            const peerPub = peerId && net.directory && net.directory[peerId] && net.directory[peerId].pubKey;
+            const myKp = await ensureMyEcdhKeys();
+            if (peerPub && myKp && myKp.priv) {
+              const pubKey = await window.crypto.subtle.importKey('jwk', peerPub, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+              return await window.crypto.subtle.deriveKey({ name: 'ECDH', public: pubKey }, myKp.priv, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+            }
+          }
+          const raw = new TextEncoder().encode('shavlo-e2ee-v1:' + String(roomId));
+          const hash = await window.crypto.subtle.digest('SHA-256', raw);
+          return await window.crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        } catch (_) { return null; }
+      }
+
+      async function encryptMsgText(roomId, plainText) {
+        const s = String(plainText || '');
+        if (!s) return null;
+        const key = await deriveRoomAesKey(roomId);
+        if (!key) return null;
+        try {
+          const iv = window.crypto.getRandomValues(new Uint8Array(12));
+          const ct = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(s));
+          const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+          return { iv: toB64(iv), ct: toB64(ct) };
+        } catch (_) { return null; }
+      }
+
+      async function deriveFallbackRoomKey(roomId) {
+        if (!window.crypto || !window.crypto.subtle || !roomId) return null;
+        try {
+          const raw = new TextEncoder().encode('shavlo-e2ee-v1:' + String(roomId));
+          const hash = await window.crypto.subtle.digest('SHA-256', raw);
+          return await window.crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        } catch (_) { return null; }
+      }
+
+      async function decryptMsgPayload(roomId, pl) {
+        if (!pl || !pl.enc || !pl.enc.iv || !pl.enc.ct) return pl;
+        const fromB64 = (b) => Uint8Array.from(atob(b), c => c.charCodeAt(0));
+        const tryKeys = [];
+        const k1 = await deriveRoomAesKey(roomId);
+        if (k1) tryKeys.push(k1);
+        const k2 = await deriveFallbackRoomKey(roomId);
+        if (k2) tryKeys.push(k2);
+        for (const k of tryKeys) {
+          try {
+            const ptBuf = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(pl.enc.iv) }, k, fromB64(pl.enc.ct));
+            return Object.assign({}, pl, { text: new TextDecoder().decode(ptBuf) });
+          } catch (_) {}
+        }
+        return pl;
+      }
+
       async function supaFetch(table, method, query, body) {
         const cfg = getSupaCfg();
         if (!cfg) return null;
@@ -1967,7 +2181,9 @@
           'apikey': cfg.key,
           'Content-Type': 'application/json'
         };
-        if (cfg.key && cfg.key.startsWith('eyJ')) {
+        if (supaAuthToken) {
+          headers['Authorization'] = 'Bearer ' + supaAuthToken;
+        } else if (cfg.key && cfg.key.startsWith('eyJ')) {
           headers['Authorization'] = 'Bearer ' + cfg.key;
         }
         if (method === 'POST') headers['Prefer'] = 'resolution=merge-duplicates,return=minimal';
@@ -1989,6 +2205,26 @@
         });
       }
 
+      function broadcastProfileFast() {
+        if (!activeVaultId || !state || !supaRealtimeChan) return;
+        try {
+          const avUrl = safeImgUrl(state.userProfile.avatarUrl) || '';
+          supaRealtimeChan.send({
+            type: 'broadcast',
+            event: 'profile_fast',
+            payload: {
+              vault_id: activeVaultId,
+              friend_code: state.userProfile.friendCode || '',
+              name: state.userProfile.name || '',
+              upi_id: state.userProfile.upiId || '',
+              avatar_text: getInitial(state.userProfile.name),
+              avatar_url: /^https?:/i.test(avUrl) ? avUrl : '',
+              updated_at: Number(state.userProfile.avatarUpdatedAt || Date.now())
+            }
+          });
+        } catch (_) {}
+      }
+
       async function pushUserToSupabase() {
         if (!activeVaultId || !state || !getSupaCfg()) return;
         supaWriteReliable('shavlo_users', 'POST', '', {
@@ -1998,6 +2234,7 @@
           upi_id: state.userProfile.upiId || '',
           avatar_text: getInitial(state.userProfile.name),
           avatar_url: safeImgUrl(state.userProfile.avatarUrl) || '',
+          pub_key: (await ensureMyEcdhKeys())?.pubJwk || null,
           updated_at: Date.now()
         });
         try {
@@ -2006,6 +2243,58 @@
           const devName = /iPhone|iPad/i.test(navigator.userAgent || '') ? 'iPhone / iPad' : (/Android/i.test(navigator.userAgent || '') ? 'Android' : 'Web Browser');
           supaWriteReliable('shavlo_sessions', 'POST', '', { id: devId, vault_id: activeVaultId, device_name: devName, last_active: Date.now() });
         } catch (_) {}
+      }
+
+      function logUserActivityToSupabase(eventType) {
+        if (!activeVaultId || !state || !getSupaCfg()) return;
+        try {
+          let devId = localStorage.getItem('shavlo_device_id_v1') || '';
+          if (!devId) {
+            devId = 'dev_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+            localStorage.setItem('shavlo_device_id_v1', devId);
+          }
+          const ua = navigator.userAgent || '';
+          const devName = /iPhone|iPad/i.test(ua) ? 'iPhone / iPad' : (/Android/i.test(ua) ? 'Android' : 'Web Browser');
+          const tz = (Intl && Intl.DateTimeFormat) ? (Intl.DateTimeFormat().resolvedOptions().timeZone || '') : '';
+          const isPwa = Boolean((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone);
+          const scr = (window.screen && window.screen.width) ? `${window.screen.width}x${window.screen.height}` : '';
+          supaWriteReliable('shavlo_user_activity', 'POST', '', {
+            id: 'act_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+            vault_id: activeVaultId,
+            friend_code: (state.userProfile && state.userProfile.friendCode) || '',
+            user_name: (state.userProfile && state.userProfile.name) || '',
+            upi_id: (state.userProfile && state.userProfile.upiId) || '',
+            event_type: String(eventType || 'login'),
+            device_id: devId,
+            device_name: devName,
+            platform: String(navigator.platform || '').slice(0, 64),
+            browser: ua.slice(0, 180),
+            screen_size: scr,
+            timezone: tz,
+            language: String(navigator.language || ''),
+            is_pwa: isPwa,
+            created_at: Date.now()
+          });
+        } catch (_) {}
+      }
+
+      let liveStats = null;
+      let _lastLiveStatsAt = 0;
+      async function fetchLiveStats(force) {
+        if (!getSupaCfg()) return;
+        const now = Date.now();
+        if (!force && liveStats && (now - _lastLiveStatsAt) < 20000) return;
+        _lastLiveStatsAt = now;
+        try {
+          const rows = await supaFetch('shavlo_live_stats', 'GET', '?select=*&limit=1');
+          if (Array.isArray(rows) && rows[0]) {
+            liveStats = rows[0];
+            const el = document.getElementById('live-sync-stats');
+            if (el) {
+              el.textContent = `${Number(liveStats.total_users || 0)} onboarded · ${Number(liveStats.online_now || 0)} online now`;
+            }
+          }
+        } catch (e) {}
       }
 
       let _prefsSyncTimer = null;
@@ -2021,8 +2310,9 @@
             upiBarcodeUrl: safeImgUrl(state.userProfile && state.userProfile.upiBarcodeUrl) || '',
             disappearTimers: state.security.disappearTimers || {},
             lockedChats: state.security.lockedChats || {},
+            notifPrefs: state.security.notifPrefs || { videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true },
             mutedIds: (state.chats || []).filter(c => c.muted).map(c => c.id),
-            pinnedIds: (state.chats || []).filter(c => c.pinned).map(c => c.id)
+            pinnedIds: Object.keys(state.security.pinnedIds || {}).filter(k => state.security.pinnedIds[k])
           };
           state.prefsUpdatedAt = Date.now();
           supaWriteReliable('shavlo_user_prefs', 'POST', '', {
@@ -2048,7 +2338,7 @@
       async function syncWithSupabase(forceFull = false) {
         if (!activeVaultId || !state || !getSupaCfg() || supaSyncInFlight) return;
         const nowS = Date.now();
-        if (!forceFull && (nowS - lastSupaSyncAt) < 2500) return;
+        if (!forceFull && (nowS - lastSupaSyncAt) < 1000) return;
         lastSupaSyncAt = nowS;
         supaSyncInFlight = true;
         try {
@@ -2092,12 +2382,22 @@
               upiId: u.upi_id || '',
               avatarText: u.avatar_text || getInitial(u.name),
               avatarUrl: u.avatar_url || '',
+              pubKey: u.pub_key || null,
               lastSeen: u.updated_at || Date.now()
             };
             if (u.vault_id === activeVaultId && Number(u.updated_at || 0) > Number(state.userProfile.avatarUpdatedAt || 0) + 2500) {
               const nextAv = u.avatar_url || '';
+              const nextNm = (u.name || '').trim();
+              let changedOwn = false;
               if (state.userProfile.avatarUrl !== nextAv) {
                 state.userProfile.avatarUrl = nextAv;
+                changedOwn = true;
+              }
+              if (nextNm && state.userProfile.name !== nextNm) {
+                state.userProfile.name = nextNm;
+                changedOwn = true;
+              }
+              if (changedOwn) {
                 state.userProfile.avatarUpdatedAt = Number(u.updated_at || Date.now());
                 persistCurrentVault();
               }
@@ -2117,14 +2417,15 @@
           }));
           const groupedMsgs = {};
           const nowMs = Date.now();
-          (msgs || []).forEach(row => {
-            if (row.expires_at && Number(row.expires_at) < nowMs) return;
+          for (const row of (msgs || [])) {
+            if (row.expires_at && Number(row.expires_at) < nowMs) continue;
+            const decPl = await decryptMsgPayload(row.room_id, row.payload);
             groupedMsgs[row.room_id] = groupedMsgs[row.room_id] || [];
-            groupedMsgs[row.room_id].push(Object.assign({}, row.payload, {
+            groupedMsgs[row.room_id].push(Object.assign({}, decPl, {
               id: row.id, authorId: row.author_id, authorName: row.author_name || '',
-              expiresAt: row.expires_at || (row.payload && row.payload.expiresAt) || null
+              expiresAt: row.expires_at || (decPl && decPl.expiresAt) || null
             }));
-          });
+          }
           Object.keys(groupedMsgs).forEach(rid => {
             const hasIncomingFromPeer = groupedMsgs[rid].some(m => m.authorId && m.authorId !== activeVaultId);
             if (hasIncomingFromPeer) markRoomDelivered(rid);
@@ -2216,6 +2517,11 @@
               ensureSecurityDefaults();
               if (pr.disappearTimers) state.security.disappearTimers = Object.assign({}, state.security.disappearTimers, pr.disappearTimers);
               if (pr.lockedChats) state.security.lockedChats = Object.assign({}, state.security.lockedChats, pr.lockedChats);
+              if (Array.isArray(pr.pinnedIds)) {
+                state.security.pinnedIds = {};
+                pr.pinnedIds.forEach(id => { state.security.pinnedIds[id] = true; });
+              }
+              if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
               state.prefsUpdatedAt = Number(prefsRows[0].updated_at || Date.now());
             }
           }
@@ -2257,18 +2563,21 @@
         try {
           if (window.supabase && typeof window.supabase.createClient === 'function') {
             supaClient = window.supabase.createClient(cfg.url, cfg.key);
+            ensureSupaAuthSession();
             supaRealtimeChan = supaClient
               .channel('shavlo-live-all', { config: { presence: { key: activeVaultId || 'anon' } } })
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_messages' }, (change) => {
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_messages' }, async (change) => {
                 try {
                   if (change && (change.eventType === 'INSERT' || change.eventType === 'UPDATE') && change.new && change.new.id && change.new.room_id) {
                     const row = change.new;
                     const net = getNetwork();
                     const list = Array.isArray(net.peerChats[row.room_id]) ? net.peerChats[row.room_id] : [];
-                    const rawPl = (typeof row.payload === "string") ? JSON.parse(row.payload) : (row.payload || {});
+                    const rawPlRaw = (typeof row.payload === "string") ? JSON.parse(row.payload) : (row.payload || {});
+                    const rawPl = await decryptMsgPayload(row.room_id, rawPlRaw);
                     const mapped = Object.assign({}, rawPl, { id: row.id, authorId: row.author_id, authorName: row.author_name || "", createdAt: Number(row.created_at || rawPl.createdAt || Date.now()) });
                     const idx = list.findIndex(m => m.id === row.id);
-                    if (idx >= 0) list[idx] = Object.assign({}, list[idx], mapped);
+                    const wasAlreadyPresent = idx >= 0;
+                    if (wasAlreadyPresent) list[idx] = Object.assign({}, list[idx], mapped);
                     else list.push(mapped);
                     net.peerChats[row.room_id] = list;
                     if (Number(row.created_at || 0) > lastSupaMsgCreatedAt) lastSupaMsgCreatedAt = Number(row.created_at || 0);
@@ -2282,7 +2591,7 @@
                         return;
                       }
                     }
-                    if (change.eventType === 'INSERT' && mapped.authorId !== activeVaultId) {
+                    if (change.eventType === 'INSERT' && !wasAlreadyPresent && mapped.authorId !== activeVaultId) {
                       notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
                       const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === row.room_id && (window.innerWidth >= 768 || state.mobileView === 'chat'));
                       if (isOpenNow) markRoomRead(row.room_id); else markRoomDelivered(row.room_id);
@@ -2320,10 +2629,12 @@
                       upiId: u.upi_id || '',
                       avatarText: u.avatar_text || getInitial(u.name),
                       avatarUrl: u.avatar_url || '',
+              pubKey: u.pub_key || null,
                       lastSeen: u.updated_at || Date.now()
                     };
                     if (u.vault_id === activeVaultId && Number(u.updated_at || 0) > Number(state.userProfile.avatarUpdatedAt || 0) + 1500) {
                       state.userProfile.avatarUrl = u.avatar_url || '';
+                      if (u.name && u.name.trim()) state.userProfile.name = u.name.trim();
                       state.userProfile.avatarUpdatedAt = Number(u.updated_at || Date.now());
                       persistCurrentVault();
                     }
@@ -2371,7 +2682,7 @@
                     net.readReceipts[rr.room_id][rr.user_id] = Number(rr.last_read_at || 0);
                     net.deliveredReceipts = net.deliveredReceipts || {};
                     net.deliveredReceipts[rr.room_id] = net.deliveredReceipts[rr.room_id] || {};
-                    net.deliveredReceipts[rr.room_id][rr.user_id] = Math.max(Number(rr.last_delivered_at || 0), Number(rr.last_read_at || 0));
+                    net.deliveredReceipts[rr.room_id][rr.user_id] = Math.max(net.deliveredReceipts[rr.room_id][rr.user_id] || 0, Number(rr.last_delivered_at || 0), Number(rr.last_read_at || 0));
                     saveNetwork(net, 'realtime_rr');
                     syncFromNetwork();
                     return;
@@ -2392,15 +2703,86 @@
                   }
                 }
               })
+              .on('broadcast', { event: 'peer_msg' }, async ({ payload }) => {
+                try {
+                  const row = payload;
+                  if (!row || !row.id || !row.room_id || row.author_id === activeVaultId) return;
+                  const net = getNetwork();
+                  const list = Array.isArray(net.peerChats[row.room_id]) ? net.peerChats[row.room_id] : [];
+                  if (list.some(m => m.id === row.id)) return;
+                  const rawPlRaw = (typeof row.payload === 'string') ? JSON.parse(row.payload) : (row.payload || {});
+                  const rawPl = await decryptMsgPayload(row.room_id, rawPlRaw);
+                  const mapped = Object.assign({}, rawPl, { id: row.id, authorId: row.author_id, authorName: row.author_name || '', createdAt: Number(row.created_at || Date.now()), expiresAt: row.expires_at || null });
+                  list.push(mapped);
+                  net.peerChats[row.room_id] = list;
+                  saveNetwork(net, 'realtime_fast_msg');
+                  notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
+                  const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === row.room_id && (window.innerWidth >= 768 || state.mobileView === 'chat'));
+                  if (isOpenNow) markRoomRead(row.room_id); else markRoomDelivered(row.room_id);
+                  syncFromNetwork();
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'rr_fast' }, ({ payload }) => {
+                try {
+                  const r = payload;
+                  if (!r || !r.room_id || !r.user_id || r.user_id === activeVaultId) return;
+                  const net = getNetwork();
+                  net.deliveredReceipts = net.deliveredReceipts || {};
+                  net.deliveredReceipts[r.room_id] = net.deliveredReceipts[r.room_id] || {};
+                  net.deliveredReceipts[r.room_id][r.user_id] = Math.max(net.deliveredReceipts[r.room_id][r.user_id] || 0, Number(r.last_delivered_at || 0));
+                  net.readReceipts = net.readReceipts || {};
+                  net.readReceipts[r.room_id] = net.readReceipts[r.room_id] || {};
+                  net.readReceipts[r.room_id][r.user_id] = Math.max(net.readReceipts[r.room_id][r.user_id] || 0, Number(r.last_read_at || 0));
+                  saveNetwork(net, 'realtime_fast_rr');
+                  syncFromNetwork();
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'profile_fast' }, ({ payload }) => {
+                try {
+                  const u = payload;
+                  if (!u || !u.vault_id || u.vault_id === activeVaultId) return;
+                  const net = getNetwork();
+                  const prev = net.directory[u.vault_id] || {};
+                  net.directory[u.vault_id] = {
+                    ...prev,
+                    vaultId: u.vault_id,
+                    friendCode: u.friend_code || prev.friendCode || '',
+                    name: u.name || prev.name || 'Friend',
+                    upiId: u.upi_id !== undefined ? u.upi_id : (prev.upiId || ''),
+                    avatarText: u.avatar_text || getInitial(u.name || prev.name),
+                    avatarUrl: u.avatar_url !== undefined ? u.avatar_url : (prev.avatarUrl || ''),
+                    lastSeen: Number(u.updated_at || Date.now())
+                  };
+                  saveNetwork(net, 'realtime_fast_profile');
+                  syncFromNetwork();
+                } catch (_) {}
+              })
               .on('broadcast', { event: 'typing' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId && payload.roomId) markRemoteTyping(payload.roomId);
               })
               .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
                 handleWebRtcSignal(payload);
               })
+              .on('broadcast', { event: 'walkie_state' }, ({ payload }) => {
+                if (!payload || payload.fromId === activeVaultId || !payload.roomId) return;
+                if (payload.active) {
+                  ui.walkieActive = true;
+                  ui.walkieChatId = payload.roomId;
+                  ui.walkiePeerSpeaking = Boolean(payload.speaking);
+                } else if (ui.walkieChatId === payload.roomId) {
+                  ui.walkiePeerSpeaking = false;
+                }
+                safeBackgroundRender();
+              })
               .on('broadcast', { event: 'walkie_audio' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId && payload.audioData) {
-                  playSubtleTone('walkie_on');
+                  const _wnp = (state && state.security && state.security.notifPrefs) || {};
+                  if (_wnp.walkie !== false) {
+                    playSubtleTone('walkie_on');
+                    if (document.hidden || state.selectedChatId !== payload.roomId) {
+                      showSystemNotif('Walkie-Talkie', 'Incoming live voice transmission', 'shavlo-walkie-' + (payload.roomId || ''), payload.roomId);
+                    }
+                  }
                   ui.walkieActive = true;
                   ui.walkieChatId = payload.roomId;
                   ui.walkiePeerSpeaking = true;
@@ -2743,17 +3125,19 @@
           const last = arr[arr.length - 1] || {};
           return k + ':' + arr.length + ':' + (last.id || '') + ':' + (last.status || '');
         }).join('|');
-        const rrDigest = JSON.stringify(net.readReceipts || {});
+        const rrDigest = JSON.stringify(net.readReceipts || {}) + '::' + JSON.stringify(net.deliveredReceipts || {});
+        const dirDigest = Object.keys(net.directory || {}).sort().map(k => k + ':' + ((net.directory[k] || {}).name || '') + ':' + ((net.directory[k] || {}).avatarUrl || '')).join('|');
         const digest = [
           msgDigest,
           rrDigest,
+          dirDigest,
           (net.requests || []).length,
           (net.friendships || []).length,
           (net.groups || []).length,
           (net.statuses || []).length,
           ui.activeCall ? (ui.activeCall.roomId + ':' + ui.activeCall.status) : ''
         ].join('#');
-        if (digest === lastSyncedNetDigest && !ui.activeCall) return;
+        if (digest === lastSyncedNetDigest) return;
         lastSyncedNetDigest = digest;
 
         const ae = document.activeElement;
@@ -2767,6 +3151,13 @@
               ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase()))
               : activeMessages;
             const wasNear = isNearChatBottom();
+            const hdrNameEl = document.getElementById('active-chat-name');
+            if (hdrNameEl && hdrNameEl.textContent !== chat.name) hdrNameEl.textContent = chat.name;
+            const hdrAvEl = document.getElementById('active-chat-avatar');
+            if (hdrAvEl && hdrAvEl.getAttribute('data-av-url') !== (chat.avatarUrl || '')) {
+              hdrAvEl.setAttribute('data-av-url', chat.avatarUrl || '');
+              hdrAvEl.innerHTML = renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', 'bg-ink dark:bg-white text-white dark:text-ink');
+            }
             patchMessageFeedInPlace(feed, chat, filteredMsgs);
             if (wasNear) scrollToBottom();
             return;
@@ -3028,6 +3419,10 @@
         if (typeof state.security.readReceipts !== 'boolean') state.security.readReceipts = true;
         if (!state.security.blockedIds) state.security.blockedIds = {};
         if (!state.security.secretChatIds) state.security.secretChatIds = {};
+        if (!state.security.pinnedIds) state.security.pinnedIds = {};
+        if (!state.security.notifPrefs) {
+          state.security.notifPrefs = { videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true };
+        }
         if (!state.wallpaper) state.wallpaper = 'clean';
         if (!Array.isArray(state.mediaVault)) state.mediaVault = [];
         if (!Array.isArray(state.sampleStatuses)) {
@@ -3041,6 +3436,23 @@
       function isChatBlocked(chatId) {
         return !!(state && state.security && state.security.blockedIds && state.security.blockedIds[chatId]);
       }
+      function isChatPinned(chat) {
+        if (!chat || !state || !state.security) return !!(chat && chat.pinned);
+        return Boolean((state.security.pinnedIds && state.security.pinnedIds[chat.id]) || chat.pinned);
+      }
+      function togglePinChat(chatId) {
+        if (!state || !chatId) return;
+        ensureSecurityDefaults();
+        const cur = Boolean(state.security.pinnedIds[chatId]);
+        const localC = (state.chats || []).find(x => x.id === chatId);
+        const next = !(cur || (localC && localC.pinned));
+        if (next) state.security.pinnedIds[chatId] = true;
+        else delete state.security.pinnedIds[chatId];
+        if (localC) localC.pinned = next;
+        persistCurrentVault();
+        showToast(next ? 'Chat pinned' : 'Chat unpinned');
+      }
+
       function isChatMuted(chat) {
         if (!chat) return false;
         return !!(chat.muted || (state && state.security && state.security.mutedChatIds && state.security.mutedChatIds[chat.id]));
@@ -3270,7 +3682,7 @@
               memberIds: g.memberIds,
               members: memberNames,
               verified: false,
-              pinned: false,
+              pinned: isChatPinned({ id: roomId }),
               muted: false,
               disappearing: false,
               unread: 0,
@@ -3500,6 +3912,7 @@
                 upiId: u.upi_id || '',
                 avatarText: u.avatar_text || getInitial(u.name),
                 avatarUrl: u.avatar_url || '',
+              pubKey: u.pub_key || null,
                 lastSeen: u.updated_at || Date.now()
               };
               net.directory[u.vault_id] = target;
@@ -3666,11 +4079,11 @@
             return `
               <form id="edit-friend-req-form" data-id="${req.id}" class="p-3.5 rounded-2xl bg-brand-50/70 dark:bg-brand-600/15 border border-brand-500/30 space-y-2.5 text-left">
                 <div class="text-[11.5px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-100">Edit ${isOutgoing ? 'sent' : 'incoming'} request</div>
-                <input name="name" type="text" value="${escapeHtml(displayName)}" placeholder="Display name" class="w-full h-10 px-3 rounded-xl bg-white dark:bg-zinc-900 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
-                ${isOutgoing ? `<input name="code" type="text" value="${escapeHtml(displayCode)}" placeholder="Paste their friend code" class="w-full h-10 px-3 rounded-xl bg-white dark:bg-zinc-900 font-sans tabular-nums text-[13px] uppercase focus:outline-none focus:ring-2 focus:ring-brand-500/40" />` : ''}
+                <input name="name" type="text" value="${escapeHtml(displayName)}" placeholder="Display name" class="w-full h-10 px-3 rounded-2xl bg-white dark:bg-zinc-900 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
+                ${isOutgoing ? `<input name="code" type="text" value="${escapeHtml(displayCode)}" placeholder="Paste their friend code" class="w-full h-10 px-3 rounded-2xl bg-white dark:bg-zinc-900 font-sans tabular-nums text-[13px] uppercase focus:outline-none focus:ring-2 focus:ring-brand-500/40" />` : ''}
                 <div class="flex items-center justify-end gap-2 pt-0.5">
-                  <button type="button" data-action="cancel-edit-req" class="px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 text-[12px] font-semibold text-muted">Cancel</button>
-                  <button type="submit" class="px-3.5 py-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-[12px] font-semibold">Save</button>
+                  <button type="button" data-action="cancel-edit-req" class="px-3 py-1.5 rounded-2xl bg-white dark:bg-zinc-900 text-[12px] font-semibold text-muted">Cancel</button>
+                  <button type="submit" class="px-3.5 py-1.5 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[12px] font-semibold">Save</button>
                 </div>
               </form>
             `;
@@ -3680,14 +4093,14 @@
               <div class="min-w-0">
                 <div class="flex items-center gap-1.5">
                   <span class="text-[14px] font-semibold text-ink dark:text-white truncate">${escapeHtml(displayName)}</span>
-                  <span class="px-1.5 py-0.5 rounded-md text-[10px] font-bold ${isOutgoing ? 'bg-zinc-200/70 dark:bg-zinc-800 text-muted' : 'bg-brand-500/15 text-brand-600 dark:text-brand-100'}">${isOutgoing ? 'Sent' : 'Incoming'}</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-bold ${isOutgoing ? 'bg-zinc-200/70 dark:bg-zinc-800 text-muted' : 'bg-brand-500/15 text-brand-600 dark:text-brand-100'}">${isOutgoing ? 'Sent' : 'Incoming'}</span>
                 </div>
                 <div class="text-[11.5px] font-sans tabular-nums text-muted truncate mt-0.5">${escapeHtml(displayCode)}${req.time ? ' • ' + escapeHtml(req.time) : ''}</div>
               </div>
               <div class="flex items-center gap-1.5 shrink-0">
-                ${!isOutgoing ? `<button type="button" data-action="accept-friend" data-id="${req.id}" class="px-2.5 py-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-[12px] font-semibold transition">Accept</button>` : ''}
-                <button type="button" data-action="edit-friend-req" data-id="${req.id}" class="px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200/70 dark:border-zinc-700 text-[12px] font-semibold text-ink dark:text-white hover:bg-brand-50 transition">Edit</button>
-                <button type="button" data-action="delete-friend-req" data-id="${req.id}" class="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 text-[12px] font-semibold hover:bg-rose-100 transition">Delete</button>
+                ${!isOutgoing ? `<button type="button" data-action="accept-friend" data-id="${req.id}" class="px-2.5 py-1.5 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[12px] font-semibold transition">Accept</button>` : ''}
+                <button type="button" data-action="edit-friend-req" data-id="${req.id}" class="px-2.5 py-1.5 rounded-2xl bg-white dark:bg-zinc-800 border border-zinc-200/70 dark:border-zinc-700 text-[12px] font-semibold text-ink dark:text-white hover:bg-brand-50 transition">Edit</button>
+                <button type="button" data-action="delete-friend-req" data-id="${req.id}" class="px-2.5 py-1.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 text-[12px] font-semibold hover:bg-rose-100 transition">Delete</button>
               </div>
             </div>
           `;
@@ -3726,17 +4139,34 @@
         callTimer = setInterval(() => {
           if (ui.activeCall && (ui.activeCall.status === 'connected' || !ui.activeCall.isPeer)) {
             ui.activeCall.seconds += 1;
-            renderCallOverlay();
+            const lbl = document.getElementById('call-status-label');
+            if (lbl) {
+              const m = String(Math.floor(ui.activeCall.seconds / 60)).padStart(2, '0');
+              const s = String(ui.activeCall.seconds % 60).padStart(2, '0');
+              lbl.textContent = `${m}:${s}`;
+            } else {
+              renderCallOverlay();
+            }
           }
         }, 1000);
       }
 
       function tryStartLocalCamera() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-        navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then(stream => {
-          localMediaStream = stream;
-          const vid = document.getElementById('local-vc-video');
-          if (vid) vid.srcObject = stream;
+        const face = (ui.activeCall && ui.activeCall.facingMode) || 'user';
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: face }, audio: false }).then(stream => {
+          const newTrack = stream.getVideoTracks()[0];
+          if (localMediaStream && newTrack) {
+            localMediaStream.getVideoTracks().forEach(t => { localMediaStream.removeTrack(t); t.stop(); });
+            localMediaStream.addTrack(newTrack);
+          } else {
+            localMediaStream = stream;
+          }
+          if (rtcPc && newTrack) {
+            const sender = rtcPc.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender) sender.replaceTrack(newTrack).catch(() => {});
+          }
+          attachCallStreams();
         }).catch(() => { /* graceful fallback */ });
       }
 
@@ -3860,6 +4290,7 @@
         setActiveVaultId(vaultId);
         state = vaults[vaultId];
         registerCurrentUserInDirectory();
+        logUserActivityToSupabase('signup');
         authState.authError = '';
         render();
         showToast(`Welcome, ${displayName} • Code: ${friendCode}`);
@@ -3888,8 +4319,12 @@
         setActiveVaultId(vaultId);
         state = vaults[vaultId];
         registerCurrentUserInDirectory();
+        logUserActivityToSupabase('login');
         authState.authError = '';
+        lastSyncedNetDigest = '';
+        render();
         syncFromNetwork();
+        fetchLiveStats(true);
         showToast(`Signed in as ${state.userProfile.name}`);
         try {
           const pendingAdd = sessionStorage.getItem('shavlo_pending_add_code');
@@ -3901,6 +4336,8 @@
       }
 
       function logoutVault() {
+        logUserActivityToSupabase('logout');
+        lastSyncedNetDigest = '';
         stopSupaPolling();
         stopLocalCamera();
         clearTimeout(statusAutoTimer);
@@ -3988,11 +4425,26 @@
           const fullMsg = { ...msg, authorId: activeVaultId, authorName: state.userProfile.name };
           net.peerChats[chat.id].push(fullMsg);
           saveNetwork(net, 'peer_message');
-          supaWriteReliable('shavlo_messages', 'POST', '', {
+          const msgRow = {
             id: fullMsg.id, room_id: chat.id, author_id: activeVaultId,
             author_name: state.userProfile.name, payload: fullMsg, created_at: Date.now(),
             expires_at: fullMsg.expiresAt || null
-          });
+          };
+          if (fullMsg.type === 'text' && fullMsg.text && !fullMsg.viewOnce) {
+            encryptMsgText(chat.id, fullMsg.text).then((encObj) => {
+              const cloudPl = encObj ? Object.assign({}, fullMsg, { text: '[Encrypted]', enc: encObj }) : fullMsg;
+              const encRow = Object.assign({}, msgRow, { payload: cloudPl });
+              if (supaRealtimeChan) {
+                try { supaRealtimeChan.send({ type: 'broadcast', event: 'peer_msg', payload: encRow }); } catch (_) {}
+              }
+              supaWriteReliable('shavlo_messages', 'POST', '', encRow);
+            });
+          } else {
+            if (supaRealtimeChan) {
+              try { supaRealtimeChan.send({ type: 'broadcast', event: 'peer_msg', payload: msgRow }); } catch (_) {}
+            }
+            supaWriteReliable('shavlo_messages', 'POST', '', msgRow);
+          }
         } else {
           const targetChat = state.chats.find(x => x.id === chat.id) || chat;
           targetChat.messages = targetChat.messages || [];
@@ -4426,7 +4878,7 @@
           renderModal();
           return false;
         }
-        if (hashPin(cleanPin) !== state.security.masterPinHash) {
+        if (!verifyPinHash(cleanPin, state.security.masterPinHash)) {
           state.security.upiPinAttempts = (state.security.upiPinAttempts || 0) + 1;
           if (state.security.upiPinAttempts >= 3) {
             state.security.upiPinLockedUntil = nowMs + 30000;
@@ -4590,7 +5042,7 @@
           renderModal();
           return false;
         }
-        if (hashPin(cleanPin) !== state.security.masterPinHash) {
+        if (!verifyPinHash(cleanPin, state.security.masterPinHash)) {
           state.security.upiPinAttempts = (state.security.upiPinAttempts || 0) + 1;
           if (state.security.upiPinAttempts >= 3) {
             state.security.upiPinLockedUntil = nowMs + 30000;
@@ -5042,7 +5494,7 @@
                   </p>
                 </div>
 
-                <div class="ios-card bg-white/95 dark:bg-[#121215]/95 backdrop-blur-md rounded-[26px] border border-[#C6A76D]/25 dark:border-[#C6A76D]/25 p-4 sm:p-5 shadow-sm">
+                <div class="ios-card bg-white/95 dark:bg-[#121215]/95 backdrop-blur-md rounded-[32px] border border-[#C6A76D]/25 dark:border-[#C6A76D]/25 p-4 sm:p-5 shadow-sm">
                   <!-- Sleek 2-Tab Pill Switcher -->
                   <div class="grid grid-cols-2 p-1 rounded-full bg-black/[0.045] dark:bg-white/[0.07] border border-black/[0.05] dark:border-white/[0.08] mb-4">
                     <button data-action="auth-mode" data-mode="signup" class="py-2 rounded-full text-[13px] font-semibold tracking-[-0.01em] transition-all duration-200 ${mode === 'signup' ? 'bg-ink text-white dark:bg-white dark:text-ink shadow-sm ring-1 ring-[#C6A76D]/60' : 'text-muted hover:text-ink dark:hover:text-white'}">
@@ -5066,12 +5518,7 @@
 
             <!-- Try Demo Button cleanly above the sketch on the right + Full-Width India Sketch -->
             <footer class="relative shrink-0 w-full">
-              <div class="w-full max-w-5xl mx-auto px-5 pb-2.5 flex justify-end">
-                <button data-action="auth-demo-login" class="px-4 py-2 rounded-full bg-white dark:bg-zinc-900 text-[#09090C] dark:text-white border border-black/10 dark:border-white/15 text-[12.5px] font-semibold tracking-[-0.01em] shadow-sm hover:shadow-md hover:scale-[1.03] transition">
-                  Try Demo →
-                </button>
-              </div>
-              <div style="padding-bottom:max(0.5rem, env(safe-area-inset-bottom));" class="group relative w-full bg-gradient-to-t from-black/[0.04] via-transparent to-transparent dark:from-white/[0.035] px-3 sm:px-6 pt-2">
+              <div style="padding-bottom:max(0.85rem, env(safe-area-inset-bottom));" class="group relative w-full bg-gradient-to-t from-black/[0.04] via-transparent to-transparent dark:from-white/[0.035] px-3 sm:px-6 pt-2">
                 <svg viewBox="0 0 720 124" preserveAspectRatio="xMidYMax meet" class="w-full h-[96px] sm:h-[124px] text-ink dark:text-white" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                   <!-- Continuous Champagne Gold Orbital Arc connecting Moon Landing to India Skyline -->
                   <path d="M38 44 Q 260 -10 682 42" stroke="#C6A76D" stroke-dasharray="3.5 3.5" stroke-width="1.25" opacity="0.8"/>
@@ -5187,17 +5634,17 @@
               </div>
               <div class="grid grid-cols-2 gap-2">
                 ${authState.generatedSeed.map((w, idx) => `
-                  <div class="px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 border border-black/[0.05] dark:border-white/10 flex items-center gap-1.5 text-[13.5px]">
+                  <div class="px-3 py-2 rounded-2xl bg-surface dark:bg-zinc-900 border border-black/[0.05] dark:border-white/10 flex items-center gap-1.5 text-[13.5px]">
                     <span class="text-[11px] font-sans tabular-nums text-muted w-4">${idx + 1}.</span>
                     <span class="font-semibold tracking-[-0.01em] text-ink dark:text-white truncate">${escapeHtml(w)}</span>
                   </div>
                 `).join('')}
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <button type="button" data-action="copy-generated-seed" class="inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 hover:bg-black/[0.06] dark:hover:bg-zinc-800 text-[12.5px] font-semibold transition">
+                <button type="button" data-action="copy-generated-seed" class="inline-flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 hover:bg-black/[0.06] dark:hover:bg-zinc-800 text-[12.5px] font-semibold transition">
                   ${icon('copy', 'w-3.5 h-3.5')} Copy
                 </button>
-                <button type="button" data-action="download-seed" class="inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 hover:bg-black/[0.06] dark:hover:bg-zinc-800 text-[12.5px] font-semibold transition">
+                <button type="button" data-action="download-seed" class="inline-flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 hover:bg-black/[0.06] dark:hover:bg-zinc-800 text-[12.5px] font-semibold transition">
                   ${icon('download', 'w-3.5 h-3.5')} Save .txt
                 </button>
               </div>
@@ -5220,7 +5667,7 @@
                 ${authState.verifyIndices.map((wordIdx, pos) => `
                   <div>
                     <label class="block text-[11px] font-semibold text-muted mb-1">Word #${wordIdx + 1}</label>
-                    <input name="v_${pos}" type="text" required autocomplete="off" autocapitalize="none" value="${escapeHtml(authState.verifyInputs[pos] || '')}" placeholder="word" class="w-full px-2.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 border border-black/[0.06] dark:border-white/10 text-[16px] font-medium focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/25" />
+                    <input name="v_${pos}" type="text" required autocomplete="off" autocapitalize="none" value="${escapeHtml(authState.verifyInputs[pos] || '')}" placeholder="word" class="w-full px-2.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 border border-black/[0.06] dark:border-white/10 text-[16px] font-medium focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/25" />
                   </div>
                 `).join('')}
               </div>
@@ -5240,18 +5687,18 @@
           <form id="login-seed-form" class="space-y-3">
             <div class="flex items-center justify-between">
               <span class="title-display text-[13.5px] font-bold tracking-[-0.015em] text-ink dark:text-white">Enter 8-word seed</span>
-              <button type="button" data-action="fill-demo-seed" class="text-[12.5px] font-semibold text-ink dark:text-white underline underline-offset-2">Fill Demo</button>
+              <button type="button" data-action="fill-demo-seed" class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black text-[12px] font-semibold text-ink dark:text-white transition">Fill Demo</button>
             </div>
             <p class="text-[12px] text-muted leading-snug">Paste all 8 words into Word #1 to auto-fill.</p>
             <div class="grid grid-cols-2 gap-2 w-full p-0.5">
               ${authState.loginWords.map((w, idx) => `
                 <div class="relative min-w-0 w-full">
                   <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-sans tabular-nums text-muted pointer-events-none select-none">${idx + 1}.</span>
-                  <input data-seed-idx="${idx}" name="w_${idx}" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="${escapeHtml(w)}" placeholder="word" class="w-full min-w-0 max-w-full box-border pl-7 pr-2.5 py-2 rounded-xl bg-surface dark:bg-zinc-900 border border-black/[0.06] dark:border-white/10 text-[16px] font-medium tracking-[-0.01em] focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/25" />
+                  <input data-seed-idx="${idx}" name="w_${idx}" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="${escapeHtml(w)}" placeholder="word" class="w-full min-w-0 max-w-full box-border pl-7 pr-2.5 py-2 rounded-2xl bg-surface dark:bg-zinc-900 border border-black/[0.06] dark:border-white/10 text-[16px] font-medium tracking-[-0.01em] focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/25" />
                 </div>
               `).join('')}
             </div>
-            <button type="submit" class="w-full py-3 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold tracking-[-0.01em] hover:opacity-90 transition">
+            <button id="login-submit-btn" type="submit" class="w-full py-3 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold tracking-[-0.01em] hover:opacity-90 transition">
               Sign In
             </button>
           </form>
@@ -5644,7 +6091,7 @@
         const lockedMap = (state.security && state.security.secretChatIds) || {};
         const filtered = getMergedChats()
           .filter(c => !q || c.name.toLowerCase().includes(q) || (!lockedMap[c.id] && getLastPreview(c).toLowerCase().includes(q)))
-          .sort((a, b) => (b.isPeer ? 2 : b.pinned ? 1 : 0) - (a.isPeer ? 2 : a.pinned ? 1 : 0));
+          .sort((a, b) => ((isChatPinned(b) ? 4 : 0) + (b.isPeer ? 2 : 0)) - ((isChatPinned(a) ? 4 : 0) + (a.isPeer ? 2 : 0)));
 
         const listMobileCls = state.mobileView === 'chat' ? 'hidden md:flex' : 'flex';
         const chatMobileCls = state.mobileView === 'list' ? 'hidden md:flex' : 'flex';
@@ -5682,7 +6129,11 @@
                   const isBlocked = isChatBlocked(c.id);
                   return `
                     <div data-chat-swipe-wrap="${c.id}" class="relative overflow-hidden rounded-2xl">
-                      <div data-swipe-tray="${c.id}" class="absolute inset-y-1 right-1 w-[164px] flex items-center gap-1.5 px-0.5 select-none transition-opacity duration-150 ${isSwiped ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}" aria-hidden="${!isSwiped}">
+                      <div data-swipe-tray="${c.id}" class="absolute inset-y-1 right-1 w-[216px] flex items-center gap-1.5 px-0.5 select-none transition-opacity duration-150 ${isSwiped ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}" aria-hidden="${!isSwiped}">
+                        <button type="button" data-action="swipe-pin" data-id="${c.id}" class="flex-1 h-[54px] rounded-2xl flex flex-col items-center justify-center gap-0.5 ${isChatPinned(c) ? 'bg-[#C6A76D] text-white' : 'bg-white text-[#09090C] border border-black/10 dark:bg-[#18181D] dark:text-white dark:border-white/15'} shadow-sm active:scale-95 transition">
+                          ${icon('pin', 'w-[15px] h-[15px]')}
+                          <span class="text-[10.5px] font-semibold tracking-tight">${isChatPinned(c) ? 'Unpin' : 'Pin'}</span>
+                        </button>
                         <button type="button" data-action="swipe-mute" data-id="${c.id}" class="flex-1 h-[54px] rounded-2xl flex flex-col items-center justify-center gap-0.5 bg-[#09090C] text-white dark:bg-white dark:text-[#09090C] shadow-sm active:scale-95 transition">
                           ${icon('mute', 'w-[15px] h-[15px]')}
                           <span class="text-[10.5px] font-semibold tracking-tight">${isMuted ? 'Unmute' : 'Mute'}</span>
@@ -5696,7 +6147,7 @@
                           <span class="text-[10.5px] font-semibold tracking-tight">Ping</span>
                         </button>
                       </div>
-                      <button data-action="select-chat" data-chat-item="${c.id}" data-id="${c.id}" style="touch-action: pan-y; transform: translateX(${isSwiped ? -170 : 0}px); transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);" class="relative z-10 w-full text-left px-3.5 py-3.5 rounded-2xl bg-[#FAFAFC] dark:bg-[#0B0B0D] flex items-center gap-4 select-none ${isSel ? 'md:bg-brand-50 md:dark:bg-brand-600/15' : ''} hover:bg-[#F3F3F7] dark:hover:bg-[#141418]">
+                      <button data-action="select-chat" data-chat-item="${c.id}" data-id="${c.id}" style="touch-action: pan-y; transform: translateX(${isSwiped ? -222 : 0}px); transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);" class="relative z-10 w-full text-left px-3.5 py-3.5 rounded-2xl bg-[#FAFAFC] dark:bg-[#0B0B0D] flex items-center gap-4 select-none ${isSel ? 'md:bg-brand-50 md:dark:bg-brand-600/15' : ''} hover:bg-[#F3F3F7] dark:hover:bg-[#141418]">
                         <div class="relative shrink-0">
                           ${(ui.ringPingChats && ui.ringPingChats[c.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
                           ${renderAvatar(c.avatarText, c.avatarUrl, 'w-14 h-14 text-[17px] font-bold', c.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
@@ -5707,7 +6158,7 @@
                               <span>${escapeHtml(c.name)}</span>
                               ${lockedMap[c.id] ? `<span title="Locked with Master Passcode" class="text-brand-500">${icon('lock', 'w-3.5 h-3.5')}</span>` : ''}
                               ${isBlocked ? '<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold">Blocked</span>' : ''}
-                              ${c.pinned ? `<span class="text-brand-500">${icon('pin', 'w-3 h-3')}</span>` : ''}
+                              ${isChatPinned(c) ? `<span class="text-brand-500">${icon('pin', 'w-3 h-3')}</span>` : ''}
                               ${isMuted ? `<span class="text-muted">${icon('mute', 'w-3 h-3')}</span>` : ''}
                             </span>
                             <span class="text-[11.5px] font-medium tabular-nums tracking-[-0.01em] text-muted/85 shrink-0">${escapeHtml(c.lastTime)}</span>
@@ -5746,9 +6197,9 @@
                   ${icon('back', 'w-5 h-5')}
                 </button>
                 <button data-action="open-modal" data-modal="contactMenu" title="Contact info, search &amp; options" class="flex items-center gap-3 min-w-0 text-left rounded-full pr-2 py-0.5 hover:opacity-80 transition">
-                  <span class="relative inline-flex shrink-0 ${isPrivateMode ? 'profile-dotted-ring' : ''}">${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}</span>
+                  <span id="active-chat-avatar" data-av-url="${escapeHtml(chat.avatarUrl || '')}" class="relative inline-flex shrink-0 ${isPrivateMode ? 'profile-dotted-ring' : ''}">${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}</span>
                   <div class="min-w-0">
-                    <h2 class="title-display text-[20px] font-bold ${isPrivateMode ? 'text-white' : 'text-ink dark:text-white'} truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
+                    <h2 id="active-chat-name" class="title-display text-[20px] font-bold ${isPrivateMode ? 'text-white' : 'text-ink dark:text-white'} truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
                     ${isPrivateMode
                       ? '<p class="text-[10.5px] text-white/70 font-semibold tracking-wider uppercase leading-tight mt-0.5">Private Mode • Pull right edge to exit</p>'
                       : ''}
@@ -5989,8 +6440,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (msg && msg.mistDissolve && msg.mistState === 'dissolved') return '';
         const isMe = msg.sender === 'me';
         const cls = isMe
-          ? 'bubble-shadow bg-gradient-to-br from-[#1B1B20] to-[#09090C] text-white dark:from-[#FAFAFC] dark:to-[#E4E4E8] dark:text-zinc-950 rounded-[20px] rounded-br-[6px]'
-          : 'bubble-shadow bg-white/95 dark:bg-zinc-900/95 text-ink dark:text-zinc-100 border border-black/[0.06] dark:border-white/[0.09] rounded-[20px] rounded-bl-[6px]';
+          ? 'bubble-shadow bg-gradient-to-br from-[#1B1B20] to-[#09090C] text-white dark:from-[#FAFAFC] dark:to-[#E4E4E8] dark:text-zinc-950 rounded-[22px] rounded-br-[10px]'
+          : 'bubble-shadow bg-white/95 dark:bg-zinc-900/95 text-ink dark:text-zinc-100 border border-black/[0.06] dark:border-white/[0.09] rounded-[22px] rounded-bl-[10px]';
 
         const metaHtml = `
           <span class="inline-flex items-center gap-1 text-[10px] font-medium tabular-nums tracking-[-0.01em] leading-none select-none ${isMe ? 'text-white/75 dark:text-zinc-950/70' : 'text-muted'}">
@@ -6011,7 +6462,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           } else if (msg.mistDissolve && msg.mistState === 'sealed') {
             body = `<button type="button" data-action="open-mist" data-id="${msg.id}" class="text-left py-1 flex items-center gap-2 text-[13.5px] font-semibold"><span class="w-2 h-2 rounded-full bg-current opacity-70 animate-pulse"></span><span>Mist Note • Tap to read</span></button>`;
           } else {
-            body = `<div class="relative overflow-hidden rounded-lg">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
+            body = `<div class="relative overflow-hidden rounded-2xl">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
           }
         } else if (msg.type === 'tug') {
           const p = Math.max(0, Math.min(100, Number(msg.pos ?? 50)));
@@ -6147,7 +6598,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <div class="text-[12.5px] opacity-80">Total ${formatRupees(msg.total)} • ${formatRupees(msg.perPerson)} each</div>
               <div class="space-y-1.5 pt-1">
                 ${msg.participants.map((p, idx) => `
-                  <div class="flex items-center justify-between text-[12.5px] px-2.5 py-1.5 rounded-xl ${isMe ? 'bg-white/15' : 'bg-surface dark:bg-zinc-800'}">
+                  <div class="flex items-center justify-between text-[12.5px] px-2.5 py-1.5 rounded-2xl ${isMe ? 'bg-white/15' : 'bg-surface dark:bg-zinc-800'}">
                     <span>${escapeHtml(p.name)}</span>
                     ${p.paid ? '<span class="font-semibold text-ink dark:text-white">Paid</span>' : `<button data-action="pay-split" data-msgid="${msg.id}" data-idx="${idx}" class="px-2.5 py-0.5 rounded-full bg-brand-500 text-white text-[11px] font-semibold">${p.name === 'You' ? 'Pay ' + formatRupees(msg.perPerson) : 'Mark paid'}</button>`}
                   </div>
@@ -6164,7 +6615,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 const voted = opt.votes.includes('You');
                 const pct = totalVotes > 0 ? Math.round((opt.votes.length / totalVotes) * 100) : 0;
                 return `
-                  <button data-action="vote-poll" data-msgid="${msg.id}" data-optid="${opt.id}" class="w-full text-left relative overflow-hidden rounded-xl border ${voted ? 'border-brand-500' : 'border-zinc-200 dark:border-zinc-700'} px-3 py-2 text-[13px]">
+                  <button data-action="vote-poll" data-msgid="${msg.id}" data-optid="${opt.id}" class="w-full text-left relative overflow-hidden rounded-2xl border ${voted ? 'border-brand-500' : 'border-zinc-200 dark:border-zinc-700'} px-3 py-2 text-[13px]">
                     <div class="absolute inset-y-0 left-0 bg-brand-500/15" style="width:${pct}%"></div>
                     <div class="relative flex justify-between gap-2">
                       <span>${voted ? '✓ ' : ''}${escapeHtml(opt.text)}</span>
@@ -6437,15 +6888,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                           <div class="text-[12px] font-semibold text-muted">8-word recovery phrase</div>
                           <div class="grid grid-cols-3 gap-2">
                             ${seedWords.map((w, idx) => `
-                              <div class="px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[12.5px] flex items-center gap-1.5">
+                              <div class="px-3 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[12.5px] flex items-center gap-1.5">
                                 <span class="text-[10px] font-sans tabular-nums text-muted">${idx + 1}.</span>
                                 <span class="font-semibold">${escapeHtml(w)}</span>
                               </div>
                             `).join('')}
                           </div>
                           <div class="flex gap-2">
-                            <button data-action="copy-vault-seed" class="px-4 py-2 rounded-xl bg-brand-500 text-white text-[12.5px] font-semibold">Copy Seed</button>
-                            <button data-action="download-vault-seed" class="px-4 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold">Download .txt</button>
+                            <button data-action="copy-vault-seed" class="px-4 py-2 rounded-2xl bg-brand-500 text-white text-[12.5px] font-semibold">Copy Seed</button>
+                            <button data-action="download-vault-seed" class="px-4 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold">Download .txt</button>
                           </div>
                         </div>
                         <div class="pt-3 border-t border-zinc-100 dark:border-zinc-900 space-y-2">
@@ -6478,7 +6929,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       </button>
                     </div>
                     <form id="profile-form" class="flex flex-col sm:flex-row gap-2.5">
-                      <input name="name" type="text" value="${escapeHtml(state.userProfile.name)}" placeholder="Display name" class="flex-1 px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
+                      <input name="name" type="text" value="${escapeHtml(state.userProfile.name)}" placeholder="Display name" class="flex-1 px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
                       <input name="upiId" type="hidden" value="${escapeHtml(state.userProfile.upiId)}" />
                       <button type="submit" class="px-5 py-2.5 rounded-full bg-ink dark:bg-white text-white dark:text-ink text-[13px] font-semibold shrink-0">Save name</button>
                     </form>
@@ -6593,15 +7044,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <label class="block text-[12px] font-semibold text-muted mb-1.5">Current passcode</label>
-                          <input name="currentPin" type="password" inputmode="numeric" maxlength="4" placeholder="Current 4 digits" class="w-full h-11 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
+                          <input name="currentPin" type="password" inputmode="numeric" maxlength="4" placeholder="Current 4 digits" class="w-full h-11 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
                         </div>
                         <div>
                           <label class="block text-[12px] font-semibold text-muted mb-1.5">New 4-digit passcode</label>
-                          <input name="newPin" type="password" inputmode="numeric" maxlength="4" placeholder="New 4 digits" class="w-full h-11 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
+                          <input name="newPin" type="password" inputmode="numeric" maxlength="4" placeholder="New 4 digits" class="w-full h-11 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
                         </div>
                         <div>
                           <label class="block text-[12px] font-semibold text-muted mb-1.5">Confirm new passcode</label>
-                          <input name="confirmPin" type="password" inputmode="numeric" maxlength="4" placeholder="Re-enter 4 digits" class="w-full h-11 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
+                          <input name="confirmPin" type="password" inputmode="numeric" maxlength="4" placeholder="Re-enter 4 digits" class="w-full h-11 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
                         </div>
                       </div>
                       <div class="flex justify-end pt-1">
@@ -6615,10 +7066,49 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     <div>
                       <div class="text-[15px] font-semibold">Live Sync</div>
                       <div class="text-[12.5px] text-muted">Encrypted real-time messaging &amp; calls</div>
+                      <div id="live-sync-stats" class="text-[11.5px] text-[#C6A76D] font-semibold tabular-nums mt-0.5">${liveStats ? `${Number(liveStats.total_users || 0)} onboarded · ${Number(liveStats.online_now || 0)} online now` : ''}</div>
                     </div>
                     <span class="px-3 py-1 rounded-full text-[11.5px] font-bold shrink-0 ${(supaStatus === 'realtime' || supaStatus === 'connected') ? 'bg-zinc-900/10 dark:bg-white/15 text-ink dark:text-white' : supaStatus === 'error' ? 'bg-rose-500/15 text-rose-600' : 'bg-surface dark:bg-zinc-900 text-muted'}">
                       ${supaStatus === 'realtime' ? 'Live ⚡' : supaStatus === 'connected' ? 'Connected ●' : supaStatus === 'error' ? 'Reconnecting' : 'Offline'}
                     </span>
+                  </div>
+
+                  <!-- SETTINGS TAB: Notification Settings -->
+                  <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3.5">
+                    <div class="flex items-center justify-between gap-2">
+                      <div>
+                        <div class="text-[15px] font-semibold">Notification Settings</div>
+                        <div class="text-[12px] text-muted">Choose alerts when app is open or closed</div>
+                      </div>
+                      <button type="button" data-action="enable-push-notifs" class="px-3 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[11.5px] font-bold shrink-0 hover:opacity-85 transition">
+                        ${(typeof Notification !== 'undefined' && Notification.permission === 'granted') ? 'Alerts On ●' : ((typeof Notification !== 'undefined' && Notification.permission === 'denied') ? 'Blocked' : 'Enable Alerts')}
+                      </button>
+                    </div>
+                    <div class="divide-y divide-zinc-100 dark:divide-zinc-900">
+                      ${(() => {
+                        ensureSecurityDefaults();
+                        const np = state.security.notifPrefs || {};
+                        const rows = [
+                          { key: 'videoCall', label: 'Video call notification' },
+                          { key: 'voiceCall', label: 'Call notification' },
+                          { key: 'messages', label: 'Message notification' },
+                          { key: 'walkie', label: 'Walkie-talkie notification' },
+                          { key: 'audio', label: 'Audio notification' },
+                          { key: 'media', label: 'Photos and video notification' }
+                        ];
+                        return rows.map(r => {
+                          const on = np[r.key] !== false;
+                          return `
+                            <div class="py-2.5 flex items-center justify-between gap-3">
+                              <span class="text-[13.5px] font-medium text-ink dark:text-white">${r.label}</span>
+                              <button type="button" data-action="toggle-notif-pref" data-key="${r.key}" role="switch" aria-checked="${on ? 'true' : 'false'}" class="w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${on ? 'bg-[#09090C] dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-800'} flex items-center ${on ? 'justify-end' : 'justify-start'} shrink-0">
+                                <span class="w-5 h-5 rounded-full ${on ? 'bg-white dark:bg-[#09090C]' : 'bg-white dark:bg-zinc-400'} shadow-sm transition-transform"></span>
+                              </button>
+                            </div>
+                          `;
+                        }).join('');
+                      })()}
+                    </div>
                   </div>
 
                   <!-- SETTINGS TAB: Blocked Users -->
@@ -6670,7 +7160,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <button data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
             </div>
             <p class="text-[13px] text-muted mb-4">Enter your 4-digit Master Passcode.</p>
-            ${ui.secretPinError ? `<div class="mb-3 px-3.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 text-[12.5px] font-medium">${escapeHtml(ui.secretPinError)}</div>` : ''}
+            ${ui.secretPinError ? `<div class="mb-3 px-3.5 py-2 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 text-[12.5px] font-medium">${escapeHtml(ui.secretPinError)}</div>` : ''}
             <form id="secret-pin-form" class="space-y-3.5">
               <input name="code" type="password" inputmode="numeric" maxlength="4" required autofocus placeholder="••••" class="w-full h-12 px-4 rounded-2xl bg-surface dark:bg-zinc-900 text-[22px] tracking-[0.5em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
               <button type="submit" class="w-full py-3 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[14.5px] font-semibold transition">Unlock Vault</button>
@@ -6710,18 +7200,18 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <form id="new-group-form" class="space-y-3.5">
               <div>
                 <label class="block text-[12.5px] font-semibold text-muted mb-1.5">Group name</label>
-                <input name="name" type="text" required placeholder="e.g. Weekend Crew or Team" class="w-full h-11 px-4 rounded-xl bg-surface dark:bg-zinc-900 text-[14.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
+                <input name="name" type="text" required placeholder="e.g. Weekend Crew or Team" class="w-full h-11 px-4 rounded-2xl bg-surface dark:bg-zinc-900 text-[14.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
               </div>
               <div>
                 <label class="block text-[12.5px] font-semibold text-muted mb-1.5">Description <span class="font-normal">(optional)</span></label>
-                <input name="desc" type="text" placeholder="What is this group about?" class="w-full h-11 px-4 rounded-xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
+                <input name="desc" type="text" placeholder="What is this group about?" class="w-full h-11 px-4 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
               </div>
               ${myFriends.length > 0 ? `
                 <div>
                   <label class="block text-[12.5px] font-semibold text-muted mb-1.5">Add connected friends</label>
                   <div class="space-y-1.5 max-h-32 overflow-y-auto thin-scroll">
                     ${myFriends.map(f => `
-                      <label class="flex items-center justify-between px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px] cursor-pointer">
+                      <label class="flex items-center justify-between px-3 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px] cursor-pointer">
                         <span class="font-medium">${escapeHtml(f.name)}</span>
                         <input type="checkbox" name="members" value="${f.vaultId}" class="accent-[#111113] w-4 h-4" />
                       </label>
@@ -6730,8 +7220,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </div>
               ` : ''}
               <div class="flex justify-end gap-2 pt-2">
-                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-xl text-[13.5px] font-semibold text-muted">Cancel</button>
-                <button type="submit" class="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold transition">Create Group</button>
+                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold transition">Create Group</button>
               </div>
             </form>
           `;
@@ -6776,15 +7266,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <form id="turn-push-form" class="space-y-3">
               <div>
                 <label class="block text-[12px] font-semibold text-muted mb-1">TURN Server URL (optional 4G/5G calls)</label>
-                <input name="turnUrl" type="text" value="${escapeHtml(curTurn.urls || '')}" placeholder="turn:a.relay.metered.ca:80" class="w-full px-3.5 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
+                <input name="turnUrl" type="text" value="${escapeHtml(curTurn.urls || '')}" placeholder="turn:a.relay.metered.ca:80" class="w-full px-3.5 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <input name="turnUser" type="text" value="${escapeHtml(curTurn.username || '')}" placeholder="Username" class="w-full px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
-                <input name="turnCred" type="password" value="${escapeHtml(curTurn.credential || '')}" placeholder="Credential" class="w-full px-3 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
+                <input name="turnUser" type="text" value="${escapeHtml(curTurn.username || '')}" placeholder="Username" class="w-full px-3 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
+                <input name="turnCred" type="password" value="${escapeHtml(curTurn.credential || '')}" placeholder="Credential" class="w-full px-3 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
               </div>
               <div>
                 <label class="block text-[12px] font-semibold text-muted mb-1">VAPID Public Key (optional Lock-Screen Push)</label>
-                <input name="vapidKey" type="text" value="${escapeHtml(localStorage.getItem('shavlo_vapid_pub_v1') || '')}" placeholder="BEl62iUYgUivxIkv..." class="w-full px-3.5 py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
+                <input name="vapidKey" type="text" value="${escapeHtml((() => { try { return localStorage.getItem('shavlo_vapid_pub_v1') || ''; } catch (e) { return ''; } })())}" placeholder="BEl62iUYgUivxIkv..." class="w-full px-3.5 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px]" />
               </div>
               <button type="submit" class="w-full py-2.5 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold hover:opacity-90 transition">Save &amp; Enable</button>
             </form>
@@ -6798,7 +7288,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <form id="edit-username-form" class="space-y-3">
               <div>
                 <label class="block text-[12px] font-semibold text-muted mb-1.5">Display name</label>
-                <input name="displayName" type="text" required maxlength="32" value="${escapeHtml(state.userProfile.name || '')}" placeholder="Enter your name" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[16px] font-medium focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
+                <input name="displayName" type="text" required maxlength="32" value="${escapeHtml(state.userProfile.name || '')}" placeholder="Enter your name" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[16px] font-medium focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
               </div>
               <button type="submit" class="w-full py-2.5 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold hover:opacity-90 transition">Save Username</button>
             </form>
@@ -6832,10 +7322,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
 
             <div class="grid grid-cols-2 p-1 rounded-2xl bg-surface dark:bg-zinc-900 mb-5">
-              <button type="button" data-action="friends-modal-tab" data-tab="add" class="py-2.5 rounded-xl text-[13.5px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.friendsModalTab === 'add' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
+              <button type="button" data-action="friends-modal-tab" data-tab="add" class="py-2.5 rounded-2xl text-[13.5px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.friendsModalTab === 'add' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
                 ${icon('userAdd', 'w-4 h-4')}<span>Add Friend</span>
               </button>
-              <button type="button" data-action="friends-modal-tab" data-tab="requests" class="py-2.5 rounded-xl text-[13.5px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.friendsModalTab === 'requests' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
+              <button type="button" data-action="friends-modal-tab" data-tab="requests" class="py-2.5 rounded-2xl text-[13.5px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.friendsModalTab === 'requests' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
                 <span>Requests</span>
                 ${reqCount > 0 ? `<span class="min-w-[18px] h-[18px] px-1 rounded-full bg-brand-500 text-white text-[10.5px] font-extrabold flex items-center justify-center">${reqCount}</span>` : ''}
               </button>
@@ -6855,7 +7345,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="4" height="4"/><rect x="13" y="7" width="4" height="4"/><rect x="7" y="13" width="4" height="4"/><path d="M13 13h4v4h-4z"/></svg>
                         <span>Scan QR</span>
                       </button>
-                      <input id="friend-qr-file-input" type="file" accept="image/*" capture="environment" class="sr-only" />
                     </div>
                     <input id="friend-code-input" name="code" type="text" value="${escapeHtml(ui.friendCodeInput)}" placeholder="Enter 9-digit friend code" class="w-full h-11 px-4 rounded-2xl bg-surface dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 font-sans tabular-nums text-[15px] uppercase placeholder:normal-case placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/35" />
                     <button type="submit" class="w-full h-11 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[14.5px] font-semibold inline-flex items-center justify-center gap-2 shadow-md shadow-brand-500/20 transition">
@@ -6954,8 +7443,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <form id="modal-send-req-form" class="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
               <label class="block text-[12.5px] font-semibold text-muted">Send a new friend request</label>
               <div class="flex gap-2">
-                <input name="code" type="text" placeholder="Paste their friend code" class="flex-1 h-10 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 font-sans tabular-nums text-[13.5px] uppercase focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
-                <button type="submit" class="px-4 h-10 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-[13px] font-semibold transition shrink-0">Send</button>
+                <input name="code" type="text" placeholder="Paste their friend code" class="flex-1 h-10 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 font-sans tabular-nums text-[13.5px] uppercase focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
+                <button type="submit" class="px-4 h-10 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[13px] font-semibold transition shrink-0">Send</button>
               </div>
             </form>
           `;
@@ -7108,34 +7597,32 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </button>
             </div>
             <div class="pt-3 space-y-1.5">
-              <button type="button" data-action="toggle-contact-online" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
+              <button type="button" data-action="toggle-contact-online" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
                 <span class="flex items-center gap-2.5"><span class="w-2.5 h-2.5 rounded-full ${isChatOnline(chat) ? (isPeerInChat(chat) ? 'bg-[#C6A76D] ring-2 ring-[#C6A76D]/50 ring-offset-1' : 'bg-[#C6A76D]') : 'bg-zinc-300 dark:bg-zinc-700'}"></span><span>Online status</span></span>
                 <span class="text-[12px] font-semibold ${isChatOnline(chat) ? ('text-[#C6A76D]') : 'text-muted'}">${isChatOnline(chat) ? (isPeerInChat(chat) ? 'In this chat' : 'Online') : 'Offline'}</span>
               </button>
-              ${!chat.isPeer ? `
-                <button type="button" data-action="row-pin" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
-                  <span class="flex items-center gap-2.5">${icon('pin', 'w-4 h-4 text-muted')}<span>${chat.pinned ? 'Unpin chat' : 'Pin chat'}</span></span>
-                  <span class="text-[12px] text-brand-500 font-semibold">${chat.pinned ? 'Pinned' : 'Off'}</span>
-                </button>
-                <button type="button" data-action="row-mute" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
-                  <span class="flex items-center gap-2.5">${icon('mute', 'w-4 h-4 text-muted')}<span>${chat.muted ? 'Unmute notifications' : 'Mute notifications'}</span></span>
-                  <span class="text-[12px] text-muted font-semibold">${chat.muted ? 'Muted' : 'On'}</span>
-                </button>
-              ` : ''}
-              <button type="button" data-action="copy-raw" data-text="${escapeHtml(chat.upiId)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
+              <button type="button" data-action="row-pin" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
+                <span class="flex items-center gap-2.5">${icon('pin', 'w-4 h-4 text-muted')}<span>${isChatPinned(chat) ? 'Unpin chat' : 'Pin chat'}</span></span>
+                <span class="text-[12px] text-brand-500 font-semibold">${isChatPinned(chat) ? 'Pinned' : 'Off'}</span>
+              </button>
+              <button type="button" data-action="row-mute" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
+                <span class="flex items-center gap-2.5">${icon('mute', 'w-4 h-4 text-muted')}<span>${isChatMuted(chat) ? 'Unmute notifications' : 'Mute notifications'}</span></span>
+                <span class="text-[12px] text-muted font-semibold">${isChatMuted(chat) ? 'Muted' : 'On'}</span>
+              </button>
+              <button type="button" data-action="copy-raw" data-text="${escapeHtml(chat.upiId)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
                 <span class="flex items-center gap-2.5">${icon('copy', 'w-4 h-4 text-muted')}<span>Copy UPI ID</span></span>
                 <span class="text-[12px] font-sans tabular-nums text-muted">${escapeHtml(chat.upiId)}</span>
               </button>
               ${chat.isLiveGroup ? `
-                <button type="button" data-action="copy-raw" data-text="${escapeHtml(chat.groupCode)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
+                <button type="button" data-action="copy-raw" data-text="${escapeHtml(chat.groupCode)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
                   <span class="flex items-center gap-2.5">${icon('groups', 'w-4 h-4 text-brand-500')}<span>Copy Group Invite Code</span></span>
                   <span class="text-[12px] font-sans tabular-nums text-brand-500">${escapeHtml(chat.groupCode)}</span>
                 </button>
-                <button type="button" data-action="leave-group" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold text-rose-600 dark:text-rose-400 transition">
+                <button type="button" data-action="leave-group" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold text-rose-600 dark:text-rose-400 transition">
                   <span class="flex items-center gap-2.5">${icon('logout', 'w-4 h-4')}<span>Leave group</span></span>
                 </button>
               ` : `
-                <button type="button" data-action="toggle-block" data-id="${chat.id}" data-name="${escapeHtml(chat.name)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold ${isChatBlocked(chat.id) ? 'text-ink dark:text-white' : 'text-rose-600 dark:text-rose-400'} transition">
+                <button type="button" data-action="toggle-block" data-id="${chat.id}" data-name="${escapeHtml(chat.name)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold ${isChatBlocked(chat.id) ? 'text-ink dark:text-white' : 'text-rose-600 dark:text-rose-400'} transition">
                   <span class="flex items-center gap-2.5">${icon('shield', 'w-4 h-4')}<span>${isChatBlocked(chat.id) ? 'Unblock ' + escapeHtml(chat.name) : 'Block ' + escapeHtml(chat.name)}</span></span>
                   <span class="text-[12px]">${isChatBlocked(chat.id) ? 'Blocked' : ''}</span>
                 </button>
@@ -7181,7 +7668,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <div class="relative aspect-square rounded-2xl overflow-hidden bg-surface dark:bg-zinc-900 group">
                     ${item.kind === 'video' ? `
                       <video src="${escapeHtml(item.url)}" class="w-full h-full object-cover cursor-pointer" data-action="view-media" data-kind="video" data-url="${escapeHtml(item.url)}" data-id="${item.id}" data-source="${item.isVault ? 'Saved Vault' : escapeHtml(chat.name)}"></video>
-                      <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-[9.5px] font-semibold pointer-events-none">Video</span>
+                      <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/60 text-white text-[9.5px] font-semibold pointer-events-none">Video</span>
                     ` : `
                       <img src="${escapeHtml(item.url)}" alt="Shared media" class="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition" data-action="view-media" data-kind="photo" data-url="${escapeHtml(item.url)}" data-id="${item.id}" data-source="${item.isVault ? 'Saved Vault' : escapeHtml(chat.name)}" />
                     `}
@@ -7202,7 +7689,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <div class="text-[13px] font-semibold text-muted mb-2">Disappearing messages</div>
               <div class="grid grid-cols-3 gap-2">
                 ${[{s:0,l:'Off'},{s:60,l:'1 minute'},{s:86400,l:'24 hours'}].map(opt => `
-                  <button type="button" data-action="set-disappear" data-id="${chat.id}" data-sec="${opt.s}" class="py-2.5 rounded-xl text-[13px] font-semibold ${curTimer === opt.s ? 'bg-brand-500 text-white' : 'bg-surface dark:bg-zinc-900 text-muted'}">${opt.l}</button>
+                  <button type="button" data-action="set-disappear" data-id="${chat.id}" data-sec="${opt.s}" class="py-2.5 rounded-2xl text-[13px] font-semibold ${curTimer === opt.s ? 'bg-brand-500 text-white' : 'bg-surface dark:bg-zinc-900 text-muted'}">${opt.l}</button>
                 `).join('')}
               </div>
             </div>
@@ -7224,14 +7711,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <img src="${escapeHtml(generateUpiQrDataUrl(p.upiUri))}" alt="Pay UPI QR" style="image-rendering:pixelated;" class="w-40 h-40 object-contain" />
               </div>
               <div class="grid grid-cols-2 gap-2 w-full mt-3">
-                <a href="${escapeHtml(p.upiUri)}" class="h-9 rounded-xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold flex items-center justify-center hover:opacity-85 transition">Open UPI App</a>
-                <a href="${escapeHtml('tez://upi/pay?' + qp)}" class="h-9 rounded-xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">GPay</a>
-                <a href="${escapeHtml('phonepe://pay?' + qp)}" class="h-9 rounded-xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">PhonePe</a>
-                <a href="${escapeHtml('paytmmp://pay?' + qp)}" class="h-9 rounded-xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">Paytm</a>
+                <a href="${escapeHtml(p.upiUri)}" class="h-9 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold flex items-center justify-center hover:opacity-85 transition">Open UPI App</a>
+                <a href="${escapeHtml('tez://upi/pay?' + qp)}" class="h-9 rounded-2xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">GPay</a>
+                <a href="${escapeHtml('phonepe://pay?' + qp)}" class="h-9 rounded-2xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">PhonePe</a>
+                <a href="${escapeHtml('paytmmp://pay?' + qp)}" class="h-9 rounded-2xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">Paytm</a>
               </div>
             </div>
             <div class="mt-3 space-y-2.5">
-              <input id="upi-utr-input" type="text" maxlength="24" placeholder="Optional UTR / Ref number" class="w-full h-10 px-3.5 rounded-xl bg-surface dark:bg-zinc-900 text-[13px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
+              <input id="upi-utr-input" type="text" maxlength="24" placeholder="Optional UTR / Ref number" class="w-full h-10 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
               <div class="flex items-center gap-2">
                 <button type="button" data-action="confirm-upi-launch" class="flex-1 h-11 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-bold hover:opacity-90 transition">I've Paid • Confirm</button>
                 <button type="button" data-action="cancel-upi-launch" class="px-4 h-11 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-muted hover:text-ink transition">Cancel</button>
@@ -7256,9 +7743,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
             ${ui.editingUpiId ? `
               <form id="edit-upi-id-form" class="mb-3 p-2.5 rounded-2xl bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/10 flex items-center gap-2">
-                <input name="upiId" type="text" required value="${escapeHtml(state.userProfile.upiId || state.userProfile.upiHandle || '')}" placeholder="yourname@okaxis" class="flex-1 min-w-0 h-9 px-3 rounded-xl bg-white dark:bg-zinc-900 text-[13.5px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
-                <button type="submit" class="h-9 px-3.5 rounded-xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold shrink-0">Save</button>
-                <button type="button" data-action="toggle-edit-upi-id" class="h-9 px-2.5 rounded-xl bg-black/[0.06] dark:bg-white/[0.1] text-[12px] font-semibold text-muted shrink-0">Cancel</button>
+                <input name="upiId" type="text" required value="${escapeHtml(state.userProfile.upiId || state.userProfile.upiHandle || '')}" placeholder="yourname@okaxis" class="flex-1 min-w-0 h-9 px-3 rounded-2xl bg-white dark:bg-zinc-900 text-[13.5px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
+                <button type="submit" class="h-9 px-3.5 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold shrink-0">Save</button>
+                <button type="button" data-action="toggle-edit-upi-id" class="h-9 px-2.5 rounded-2xl bg-black/[0.06] dark:bg-white/[0.1] text-[12px] font-semibold text-muted shrink-0">Cancel</button>
               </form>
             ` : ''}
             <div class="grid grid-cols-3 p-1 rounded-full bg-black/[0.045] dark:bg-white/[0.07] mb-4">
@@ -7364,11 +7851,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           inner = `
             <h3 class="title-display font-bold text-[20px]">Split a bill</h3>
             <form id="split-form" class="mt-4 space-y-3">
-              <input name="title" type="text" required placeholder="What is this bill for?" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
-              <input name="total" type="number" min="10" required placeholder="Total amount in ₹" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[16px] font-bold" />
+              <input name="title" type="text" required placeholder="What is this bill for?" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <input name="total" type="number" min="10" required placeholder="Total amount in ₹" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[16px] font-bold" />
               <div class="flex justify-end gap-2 pt-2">
-                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-xl text-[13.5px] font-semibold text-muted">Cancel</button>
-                <button type="submit" class="px-5 py-2 rounded-xl bg-brand-500 text-white text-[13.5px] font-semibold">Share Split</button>
+                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
+                <button type="submit" class="px-5 py-2 rounded-2xl bg-brand-500 text-white text-[13.5px] font-semibold">Share Split</button>
               </div>
             </form>
           `;
@@ -7515,14 +8002,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <h3 class="title-display font-bold text-[20px]">Tug of War</h3>
             <p class="text-[12.5px] text-muted mt-0.5">Minimal Black &amp; White live decision bar</p>
             <form id="tug-form" class="mt-4 space-y-2.5">
-              <input name="question" type="text" required placeholder="Decision (e.g. Weekend Trip?)" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <input name="question" type="text" required placeholder="Decision (e.g. Weekend Trip?)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               <div class="grid grid-cols-2 gap-2">
-                <input name="leftOpt" type="text" required placeholder="Left (e.g. Goa)" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
-                <input name="rightOpt" type="text" required placeholder="Right (e.g. Manali)" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
+                <input name="leftOpt" type="text" required placeholder="Left (e.g. Goa)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
+                <input name="rightOpt" type="text" required placeholder="Right (e.g. Manali)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               </div>
               <div class="flex justify-end gap-2 pt-2">
-                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-xl text-[13.5px] font-semibold text-muted">Cancel</button>
-                <button type="submit" class="px-5 py-2 rounded-xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold">Start Tug</button>
+                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
+                <button type="submit" class="px-5 py-2 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold">Start Tug</button>
               </div>
             </form>
           `;
@@ -7550,13 +8037,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           inner = `
             <h3 class="title-display font-bold text-[20px]">Create a poll</h3>
             <form id="poll-form" class="mt-4 space-y-2.5">
-              <input name="question" type="text" required placeholder="Ask a question..." class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
-              <input name="opt1" type="text" required placeholder="Option 1" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
-              <input name="opt2" type="text" required placeholder="Option 2" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
-              <input name="opt3" type="text" placeholder="Option 3 (optional)" class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <input name="question" type="text" required placeholder="Ask a question..." class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <input name="opt1" type="text" required placeholder="Option 1" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <input name="opt2" type="text" required placeholder="Option 2" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <input name="opt3" type="text" placeholder="Option 3 (optional)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               <div class="flex justify-end gap-2 pt-2">
-                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-xl text-[13.5px] font-semibold text-muted">Cancel</button>
-                <button type="submit" class="px-5 py-2 rounded-xl bg-brand-500 text-white text-[13.5px] font-semibold">Post Poll</button>
+                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
+                <button type="submit" class="px-5 py-2 rounded-2xl bg-brand-500 text-white text-[13.5px] font-semibold">Post Poll</button>
               </div>
             </form>
           `;
@@ -7568,7 +8055,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               ${DUKAAN_CATALOG.map(it => {
                 const qty = catalogCart[it.id] || 0;
                 return `
-                  <div class="flex items-center justify-between p-2.5 rounded-xl bg-surface dark:bg-zinc-900">
+                  <div class="flex items-center justify-between p-2.5 rounded-2xl bg-surface dark:bg-zinc-900">
                     <div class="min-w-0 pr-2">
                       <div class="text-[13.5px] font-semibold truncate">${it.emoji} ${escapeHtml(it.name)}</div>
                       <div class="text-[12.5px] text-muted">${formatRupees(it.price)} / ${it.unit}</div>
@@ -7585,8 +8072,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <div class="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
               <div class="font-bold text-[16px]">${formatRupees(cartTotal)}</div>
               <div class="flex gap-2">
-                <button type="button" data-action="close-modal" class="px-3.5 py-2 rounded-xl text-[13px] font-semibold text-muted">Close</button>
-                <button type="button" data-action="place-order" class="px-4 py-2 rounded-xl bg-brand-500 text-white text-[13px] font-semibold disabled:opacity-40" ${cartTotal === 0 ? 'disabled' : ''}>Send Order</button>
+                <button type="button" data-action="close-modal" class="px-3.5 py-2 rounded-2xl text-[13px] font-semibold text-muted">Close</button>
+                <button type="button" data-action="place-order" class="px-4 py-2 rounded-2xl bg-brand-500 text-white text-[13px] font-semibold disabled:opacity-40" ${cartTotal === 0 ? 'disabled' : ''}>Send Order</button>
               </div>
             </div>
           `;
@@ -7617,8 +8104,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </label>
               </div>
               <div class="flex justify-end gap-2 pt-1">
-                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-xl text-[13.5px] font-semibold text-muted">Cancel</button>
-                <button type="submit" class="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold">Post for 24h</button>
+                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold">Post for 24h</button>
               </div>
             </form>
           `;
@@ -7628,10 +8115,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <h3 class="title-display font-bold text-[19px]">Forward message</h3>
               <button data-action="close-modal" class="p-1 text-muted">${icon('close', 'w-4 h-4')}</button>
             </div>
-            <p class="text-[13px] text-muted mb-3 p-3 rounded-xl bg-surface dark:bg-zinc-900 truncate">"${escapeHtml(ui.forwardMsg.text)}"</p>
+            <p class="text-[13px] text-muted mb-3 p-3 rounded-2xl bg-surface dark:bg-zinc-900 truncate">"${escapeHtml(ui.forwardMsg.text)}"</p>
             <div class="space-y-1.5 max-h-64 overflow-y-auto thin-scroll">
               ${allChats.map(c => `
-                <button type="button" data-action="confirm-forward" data-id="${c.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 text-left transition">
+                <button type="button" data-action="confirm-forward" data-id="${c.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-left transition">
                   <span class="font-semibold text-[14px]">${escapeHtml(c.name)}</span>
                   <span class="text-[12px] font-semibold text-brand-500">Send →</span>
                 </button>
@@ -7643,10 +8130,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           inner = `
             <h3 class="title-display font-bold text-[19px] mb-3">Edit message</h3>
             <form id="edit-msg-form" class="space-y-3">
-              <textarea name="text" rows="3" required class="w-full px-3.5 py-2.5 rounded-xl bg-surface dark:bg-zinc-900 text-[14.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40">${escapeHtml(targetMsg ? targetMsg.text : '')}</textarea>
+              <textarea name="text" rows="3" required class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40">${escapeHtml(targetMsg ? targetMsg.text : '')}</textarea>
               <div class="flex justify-end gap-2">
-                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-xl text-[13px] font-semibold text-muted">Cancel</button>
-                <button type="submit" class="px-5 py-2 rounded-xl bg-brand-500 text-white text-[13px] font-semibold">Save</button>
+                <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13px] font-semibold text-muted">Cancel</button>
+                <button type="submit" class="px-5 py-2 rounded-2xl bg-brand-500 text-white text-[13px] font-semibold">Save</button>
               </div>
             </form>
           `;
@@ -7657,7 +8144,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <button data-action="close-modal" class="p-1 text-muted">${icon('close', 'w-4 h-4')}</button>
             </div>
             <div class="grid grid-cols-7 gap-2">
-              ${EMOJIS.map(em => `<button data-action="insert-emoji" data-emoji="${em}" class="h-10 rounded-xl bg-surface dark:bg-zinc-900 hover:bg-brand-50 text-xl flex items-center justify-center">${em}</button>`).join('')}
+              ${EMOJIS.map(em => `<button data-action="insert-emoji" data-emoji="${em}" class="h-10 rounded-2xl bg-surface dark:bg-zinc-900 hover:bg-brand-50 text-xl flex items-center justify-center">${em}</button>`).join('')}
             </div>
           `;
         } else if (ui.modal === 'favCalls') {
@@ -7694,7 +8181,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <div class="pt-3 mt-2 border-t border-black/[0.06] dark:border-white/[0.08]">
                   <div class="text-[11.5px] font-semibold text-muted uppercase tracking-wider mb-2 px-1">Add to Favourites</div>
                   ${otherList.map(c => `
-                    <button type="button" data-action="toggle-fav-call" data-id="${c.id}" class="w-full flex items-center justify-between gap-3 px-2.5 py-2 rounded-xl hover:bg-surface dark:hover:bg-zinc-900 transition text-left">
+                    <button type="button" data-action="toggle-fav-call" data-id="${c.id}" class="w-full flex items-center justify-between gap-3 px-2.5 py-2 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 transition text-left">
                       <div class="flex items-center gap-2.5 min-w-0">
                         ${renderAvatar(c.avatarText, c.avatarUrl, 'w-8 h-8 text-[12px] font-bold', 'bg-black/10 dark:bg-white/10 text-ink dark:text-white')}
                         <span class="title-display text-[15px] font-bold tracking-[-0.02em] text-ink dark:text-white truncate">${escapeHtml(c.name)}</span>
@@ -7799,65 +8286,185 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         const isBottomSheet = (ui.modal === 'photoPicker' || ui.modal === 'upi');
         root.innerHTML = `
           <div data-action="close-modal-backdrop" class="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm flex ${isBottomSheet ? 'items-end justify-center p-0 sm:items-center sm:p-4' : 'items-center justify-center p-4'}">
-            <div class="glass-modal ${isBottomSheet ? (isSameOpenModal ? '' : 'animate-slide-up ') + 'w-full max-w-lg rounded-t-[32px] rounded-b-none sm:rounded-[30px] max-h-[78dvh] overflow-y-auto thin-scroll px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6' : (isSameOpenModal ? '' : 'glass-pop ') + 'w-full max-w-md max-h-[86dvh] overflow-y-auto thin-scroll p-5 sm:p-6'}">
+            <div class="glass-modal ${isBottomSheet ? (isSameOpenModal ? '' : 'animate-slide-up ') + 'w-full max-w-lg rounded-t-[36px] rounded-b-none sm:rounded-[34px] max-h-[78dvh] overflow-y-auto thin-scroll px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6' : (isSameOpenModal ? '' : 'glass-pop ') + 'w-full max-w-md max-h-[86dvh] overflow-y-auto thin-scroll p-5 sm:p-6'}">
               ${inner}
             </div>
           </div>
         `;
       }
 
-      function renderCallOverlay() {
-        const root = document.getElementById('call-root');
-        if (!ui.activeCall || !state) { root.innerHTML = ''; return; }
-        const call = ui.activeCall;
-        const mins = String(Math.floor(call.seconds / 60)).padStart(2, '0');
-        const secs = String(call.seconds % 60).padStart(2, '0');
-        const statusLabel = call.status === 'incoming'
-          ? `Incoming ${call.type === 'video' ? 'Video Call' : 'Voice Call'}...`
-          : (call.status === 'ringing' ? 'Ringing...' : `${mins}:${secs}`);
-
-        root.innerHTML = `
-          <div class="fixed inset-0 z-[70] bg-[#111114] text-white flex flex-col items-center justify-between py-14 px-6">
-            <div class="text-center">
-              <span class="text-[12px] uppercase tracking-widest text-brand-100 font-semibold">${call.type === 'video' ? 'Video Call' : 'Voice Call'}</span>
-              <h2 class="title-display text-[28px] font-bold mt-2">${escapeHtml(call.peerName)}</h2>
-              <p class="text-[14px] text-zinc-400 mt-1">${statusLabel}</p>
-            </div>
-            <div>
-              <audio id="remote-vc-audio" autoplay playsinline class="hidden"></audio>
-              ${call.type === 'video' && call.status === 'connected' ? `
-                <div class="relative w-72 h-56 sm:w-96 sm:h-64 rounded-3xl overflow-hidden bg-zinc-900 border border-white/10 shadow-2xl flex items-center justify-center">
-                  <video id="remote-vc-video" autoplay playsinline class="w-full h-full object-cover"></video>
-                  ${call.camOn ? `<video id="local-vc-video" autoplay playsinline muted class="absolute bottom-3 right-3 w-24 h-18 rounded-2xl object-cover border border-white/25 shadow-lg"></video>` : ''}
-                </div>
-              ` : `
-                <div class="w-28 h-28 rounded-full bg-brand-500 text-white title-display text-[36px] font-bold flex items-center justify-center shadow-2xl">
-                  ${escapeHtml(call.avatarText)}
-                </div>
-              `}
-            </div>
-            <div class="flex items-center gap-3">
-              ${call.status === 'incoming' ? `
-                <button data-action="end-call" class="px-6 py-3 rounded-full bg-rose-600 text-white text-[13.5px] font-semibold">Decline</button>
-                <button data-action="accept-call" class="px-6 py-3 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 text-[13.5px] font-semibold">Accept</button>
-              ` : `
-                <button data-action="call-toggle-mute" class="px-4 py-3 rounded-full ${call.muted ? 'bg-white text-ink' : 'bg-white/15 text-white'} text-[13px] font-semibold">${call.muted ? 'Muted' : 'Mute'}</button>
-                ${call.type === 'video' ? `<button data-action="call-toggle-cam" class="px-4 py-3 rounded-full ${!call.camOn ? 'bg-white text-ink' : 'bg-white/15 text-white'} text-[13px] font-semibold">${call.camOn ? 'Camera On' : 'Camera Off'}</button>` : ''}
-                <button data-action="end-call" class="px-6 py-3 rounded-full bg-rose-600 text-white text-[13.5px] font-semibold">End</button>
-              `}
-            </div>
-          </div>
-        `;
+      function attachCallStreams() {
         if (localMediaStream) {
           const vid = document.getElementById('local-vc-video');
           if (vid && vid.srcObject !== localMediaStream) { vid.srcObject = localMediaStream; vid.play().catch(() => {}); }
         }
         if (remoteMediaStream) {
           const rvid = document.getElementById('remote-vc-video');
-          if (rvid && rvid.srcObject !== remoteMediaStream) { rvid.srcObject = remoteMediaStream; rvid.play().catch(() => {}); }
+          const hasLiveVid = remoteMediaStream.getVideoTracks().some(t => t.readyState === 'live' && !t.muted);
+          if (rvid) {
+            if (rvid.srcObject !== remoteMediaStream) { rvid.srcObject = remoteMediaStream; rvid.play().catch(() => {}); }
+            rvid.classList.toggle('opacity-0', !hasLiveVid && remoteMediaStream.getVideoTracks().length === 0);
+          }
+          const ph = document.getElementById('call-remote-placeholder');
+          if (ph && remoteMediaStream.getVideoTracks().length > 0) ph.classList.add('hidden');
           const raud = document.getElementById('remote-vc-audio');
           if (raud && raud.srcObject !== remoteMediaStream) { raud.srcObject = remoteMediaStream; raud.play().catch(() => {}); }
         }
+      }
+
+      let _lastCallRenderKey = '';
+      function renderCallOverlay() {
+        const root = document.getElementById('call-root');
+        if (!ui.activeCall || !state) { _lastCallRenderKey = ''; root.innerHTML = ''; return; }
+        const call = ui.activeCall;
+        const callKey = [
+          call.roomId, call.status, call.type,
+          call.muted ? 1 : 0, call.camOn ? 1 : 0,
+          call.pip ? 1 : 0, call.pipCorner || 'tr',
+          call.muteMenuOpen ? 1 : 0, call.facingMode || 'user'
+        ].join(':');
+        if (callKey === _lastCallRenderKey && document.getElementById('call-overlay-wrap')) {
+          attachCallStreams();
+          return;
+        }
+        _lastCallRenderKey = callKey;
+        const mins = String(Math.floor(call.seconds / 60)).padStart(2, '0');
+        const secs = String(call.seconds % 60).padStart(2, '0');
+        const statusLabel = call.status === 'incoming'
+          ? `Incoming ${call.type === 'video' ? 'Video Call' : 'Voice Call'}...`
+          : (call.status === 'ringing' ? 'Ringing...' : `${mins}:${secs}`);
+
+        // Floating Mini PiP Mode (glides to top-left / top-right / bottom-left / bottom-right while chatting!)
+        if (call.type === 'video' && call.pip) {
+          const corner = call.pipCorner || 'tr';
+          const posCls = corner === 'tl' ? 'top-14 left-3'
+            : (corner === 'bl' ? 'bottom-24 left-3'
+            : (corner === 'br' ? 'bottom-24 right-3' : 'top-14 right-3'));
+          root.innerHTML = `
+            <div id="call-overlay-wrap" data-pip-corner="${corner}" class="fixed ${posCls} z-[75] w-32 h-44 rounded-3xl overflow-hidden bg-[#09090C] border border-white/30 shadow-[0_18px_42px_-8px_rgba(0,0,0,0.6)] select-none" style="touch-action:none; transition: top 240ms cubic-bezier(0.22,1,0.36,1), left 240ms cubic-bezier(0.22,1,0.36,1), right 240ms cubic-bezier(0.22,1,0.36,1), bottom 240ms cubic-bezier(0.22,1,0.36,1);">
+              <audio id="remote-vc-audio" autoplay playsinline class="hidden"></audio>
+              <video id="remote-vc-video" autoplay playsinline class="w-full h-full object-cover pointer-events-none"></video>
+              ${call.camOn ? `<video id="local-vc-video" autoplay playsinline muted class="absolute bottom-1.5 right-1.5 w-11 h-14 rounded-2xl object-cover border border-white/30 shadow-md pointer-events-none"></video>` : ''}
+              <div class="absolute inset-x-0 top-0 p-2 bg-gradient-to-b from-black/70 to-transparent flex items-center justify-between pointer-events-none">
+                <span id="call-status-label" class="text-[10.5px] font-bold text-white tabular-nums">${statusLabel}</span>
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              </div>
+            </div>
+          `;
+          attachCallStreams();
+          return;
+        }
+
+        // Full-Screen Edge-to-Edge Video Call
+        if (call.type === 'video' && call.status !== 'incoming') {
+          const hasRemoteVid = Boolean(remoteMediaStream && remoteMediaStream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled));
+          const mirrorLocal = (call.facingMode || 'user') !== 'environment';
+          root.innerHTML = `
+            <div id="call-overlay-wrap" class="fixed inset-0 z-[70] bg-[#09090C] text-white flex flex-col justify-between overflow-hidden select-none">
+              <audio id="remote-vc-audio" autoplay playsinline class="hidden"></audio>
+              ${!hasRemoteVid ? `
+                <div id="call-remote-placeholder" class="absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,rgba(198,167,109,0.18),rgba(9,9,12,0.98)_70%)] flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
+                  <div class="w-24 h-24 rounded-full bg-white/10 backdrop-blur-2xl border border-[#C6A76D]/40 text-white title-display text-[32px] font-bold flex items-center justify-center shadow-2xl">
+                    ${escapeHtml(call.avatarText)}
+                  </div>
+                </div>
+              ` : ''}
+              <video id="remote-vc-video" autoplay playsinline class="absolute inset-0 w-full h-full object-cover ${hasRemoteVid ? '' : 'opacity-0'}"></video>
+              <div class="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/55 pointer-events-none"></div>
+
+              <!-- Top Bar + Swipe-Down Handle -->
+              <div style="padding-top:max(1rem, env(safe-area-inset-top));" class="relative z-20 px-5 flex items-start justify-between">
+                <div>
+                  <div class="w-10 h-1 rounded-full bg-white/45 mb-2.5"></div>
+                  <h2 class="title-display text-[22px] font-bold leading-tight drop-shadow">${escapeHtml(call.peerName)}</h2>
+                  <p id="call-status-label" class="text-[13px] text-white/80 font-medium tabular-nums mt-0.5">${statusLabel}</p>
+                </div>
+                ${call.camOn ? `
+                  <div class="w-28 h-36 rounded-3xl overflow-hidden bg-zinc-900/90 border border-white/30 shadow-2xl shrink-0">
+                    <video id="local-vc-video" autoplay playsinline muted class="w-full h-full object-cover ${mirrorLocal ? '-scale-x-100' : ''}"></video>
+                  </div>
+                ` : `
+                  <div class="w-28 h-36 rounded-3xl bg-black/50 backdrop-blur-2xl border border-white/20 flex items-center justify-center text-white/60 shrink-0">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="3"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                  </div>
+                `}
+              </div>
+
+              <!-- Bottom-Left 3-Dot Glassy Menu + Cut Button in Front -->
+              <div style="padding-bottom:max(1.5rem, env(safe-area-inset-bottom));" class="relative z-20 px-5 flex items-end justify-between">
+                <div class="flex flex-col items-start">
+                  ${call.muteMenuOpen ? `
+                    <div class="mb-3 flex flex-col gap-2.5 animate-fade">
+                      <button type="button" data-action="call-toggle-mute" title="${call.muted ? 'Unmute Audio' : 'Mute Audio'}" aria-label="${call.muted ? 'Unmute Audio' : 'Mute Audio'}" class="w-12 h-12 rounded-full backdrop-blur-2xl border shadow-2xl flex items-center justify-center active:scale-90 transition ${call.muted ? 'bg-white text-[#09090C] border-white' : 'bg-white/15 hover:bg-white/25 text-white border-white/25'}">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>${call.muted ? '<line x1="2" x2="22" y1="2" y2="22"/>' : ''}</svg>
+                      </button>
+                      <button type="button" data-action="call-toggle-cam" title="${call.camOn ? 'Camera Off' : 'Camera On'}" aria-label="${call.camOn ? 'Camera Off' : 'Camera On'}" class="w-12 h-12 rounded-full backdrop-blur-2xl border shadow-2xl flex items-center justify-center active:scale-90 transition ${!call.camOn ? 'bg-white text-[#09090C] border-white' : 'bg-white/15 hover:bg-white/25 text-white border-white/25'}">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="3"/>${!call.camOn ? '<line x1="2" x2="22" y1="2" y2="22"/>' : ''}</svg>
+                      </button>
+                      <button type="button" data-action="call-flip-cam" title="Flip Camera" aria-label="Flip Camera" class="w-12 h-12 rounded-full backdrop-blur-2xl bg-white/15 hover:bg-white/25 text-white border border-white/25 shadow-2xl flex items-center justify-center active:scale-90 transition">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+                      </button>
+                    </div>
+                  ` : ''}
+                  <button type="button" data-action="call-mute-menu" title="Call Controls" aria-label="Call Controls" class="w-12 h-12 rounded-full backdrop-blur-2xl ${call.muteMenuOpen ? 'bg-white text-[#09090C] border-white' : 'bg-white/15 hover:bg-white/25 text-white border-white/25'} border shadow-2xl flex items-center justify-center active:scale-90 transition">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                  </button>
+                </div>
+                <button type="button" data-action="end-call" title="End Call" aria-label="End Call" class="w-12 h-12 rounded-full backdrop-blur-2xl bg-rose-600/85 hover:bg-rose-500 text-white border border-rose-300/35 shadow-2xl flex items-center justify-center active:scale-90 transition">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+          `;
+          attachCallStreams();
+          return;
+        }
+
+        // Audio Call / Incoming Call Full-Screen Window
+        root.innerHTML = `
+          <div id="call-overlay-wrap" class="fixed inset-0 z-[70] bg-[#09090C] text-white flex flex-col justify-between overflow-hidden select-none">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(198,167,109,0.18),rgba(9,9,12,0.98)_70%)] pointer-events-none"></div>
+            <audio id="remote-vc-audio" autoplay playsinline class="hidden"></audio>
+
+            <div style="padding-top:max(2.5rem, env(safe-area-inset-top));" class="relative z-10 text-center px-6">
+              <span class="text-[11.5px] uppercase tracking-[0.2em] text-[#C6A76D] font-semibold">${call.type === 'video' ? 'Video Call' : 'Audio Call'}</span>
+              <h2 class="title-display text-[28px] font-bold mt-2">${escapeHtml(call.peerName)}</h2>
+              <p id="call-status-label" class="text-[14px] text-white/75 mt-1 tabular-nums">${statusLabel}</p>
+            </div>
+
+            <div class="relative z-10 flex items-center justify-center">
+              <div class="w-28 h-28 rounded-full bg-white/10 backdrop-blur-2xl border border-[#C6A76D]/40 text-white title-display text-[36px] font-bold flex items-center justify-center shadow-2xl">
+                ${escapeHtml(call.avatarText)}
+              </div>
+            </div>
+
+            ${call.status === 'incoming' ? `
+              <div style="padding-bottom:max(2.25rem, env(safe-area-inset-bottom));" class="relative z-10 flex items-center justify-center gap-4 px-6">
+                <button type="button" data-action="end-call" class="px-7 py-3 rounded-full backdrop-blur-2xl bg-rose-600/85 hover:bg-rose-500 text-white border border-rose-300/35 text-[13.5px] font-semibold shadow-2xl active:scale-95 transition">Decline</button>
+                <button type="button" data-action="accept-call" class="px-7 py-3 rounded-full bg-white text-[#09090C] text-[13.5px] font-semibold shadow-2xl active:scale-95 transition">Accept</button>
+              </div>
+            ` : `
+              <div style="padding-bottom:max(1.5rem, env(safe-area-inset-bottom));" class="relative z-20 px-5 flex items-end justify-between">
+                <div class="flex flex-col items-start">
+                  ${call.muteMenuOpen ? `
+                    <div class="mb-3 flex flex-col gap-2.5 animate-fade">
+                      <button type="button" data-action="call-toggle-mute" title="${call.muted ? 'Unmute Audio' : 'Mute Audio'}" aria-label="${call.muted ? 'Unmute Audio' : 'Mute Audio'}" class="w-12 h-12 rounded-full backdrop-blur-2xl border shadow-2xl flex items-center justify-center active:scale-90 transition ${call.muted ? 'bg-white text-[#09090C] border-white' : 'bg-white/15 hover:bg-white/25 text-white border-white/25'}">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>${call.muted ? '<line x1="2" x2="22" y1="2" y2="22"/>' : ''}</svg>
+                      </button>
+                    </div>
+                  ` : ''}
+                  <button type="button" data-action="call-mute-menu" title="Call Controls" aria-label="Call Controls" class="w-12 h-12 rounded-full backdrop-blur-2xl ${call.muteMenuOpen ? 'bg-white text-[#09090C] border-white' : 'bg-white/15 hover:bg-white/25 text-white border-white/25'} border shadow-2xl flex items-center justify-center active:scale-90 transition">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                  </button>
+                </div>
+                <button type="button" data-action="end-call" title="End Call" aria-label="End Call" class="w-12 h-12 rounded-full backdrop-blur-2xl bg-rose-600/85 hover:bg-rose-500 text-white border border-rose-300/35 shadow-2xl flex items-center justify-center active:scale-90 transition">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+            `}
+          </div>
+        `;
+        attachCallStreams();
       }
 
       function render() {
@@ -8199,8 +8806,16 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (action === 'join-private-room') { enterPrivateRoom('join'); return; }
         if (action === 'leave-private-room') { leavePrivateRoom(); return; }
         if (action === 'copy-priv-code') { copyText(btn.dataset.text || '', 'Room code copied: ' + (btn.dataset.text || '')); return; }
-        if (action === 'auth-demo-login') { completeLogin(DEMO_SEED); return; }
-        if (action === 'fill-demo-seed') { authState.loginWords = [...DEMO_SEED]; authState.authError = ''; render(); return; }
+        if (action === 'fill-demo-seed') {
+          authState.loginWords = [...DEMO_SEED];
+          authState.authError = '';
+          render();
+          setTimeout(() => {
+            const btn = document.getElementById('login-submit-btn');
+            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }, 30);
+          return;
+        }
         if (action === 'regen-seed') { authState.generatedSeed = generateSeedPhrase(); render(); return; }
         if (action === 'copy-generated-seed') { copyText(authState.generatedSeed.join(' '), 'Seed phrase copied'); return; }
         if (action === 'download-seed') { downloadSeedFile(authState.generatedSeed, authState.displayName, ''); return; }
@@ -8511,16 +9126,49 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           initiateCall(getSelectedChat(), btn.dataset.type);
         } else if (action === 'accept-call') {
           acceptIncomingPeerCall();
+        } else if (action === 'call-mute-menu') {
+          if (ui.activeCall) {
+            ui.activeCall.muteMenuOpen = !ui.activeCall.muteMenuOpen;
+            renderCallOverlay();
+          }
+        } else if (action === 'call-flip-cam') {
+          if (ui.activeCall && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const prevFace = ui.activeCall.facingMode || 'user';
+            const nextFace = (prevFace === 'environment') ? 'user' : 'environment';
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFace }, audio: false }).then((newVidStream) => {
+              const newTrack = newVidStream.getVideoTracks()[0];
+              if (!newTrack) return;
+              if (ui.activeCall) ui.activeCall.facingMode = nextFace;
+              if (localMediaStream) {
+                localMediaStream.getVideoTracks().forEach(t => { localMediaStream.removeTrack(t); t.stop(); });
+                localMediaStream.addTrack(newTrack);
+              } else {
+                localMediaStream = newVidStream;
+              }
+              if (rtcPc) {
+                const sender = rtcPc.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender) sender.replaceTrack(newTrack).catch(() => {});
+              }
+              attachCallStreams();
+              renderCallOverlay();
+            }).catch(() => { showToast('Could not switch camera'); });
+          }
         } else if (action === 'call-toggle-mute') {
           if (ui.activeCall) {
             ui.activeCall.muted = !ui.activeCall.muted;
+            ui.activeCall.muteMenuOpen = false;
             if (localMediaStream) localMediaStream.getAudioTracks().forEach(t => { t.enabled = !ui.activeCall.muted; });
             renderCallOverlay();
           }
         } else if (action === 'call-toggle-cam') {
           if (ui.activeCall) {
             ui.activeCall.camOn = !ui.activeCall.camOn;
-            if (!ui.activeCall.camOn) stopLocalCamera(); else tryStartLocalCamera();
+            ui.activeCall.muteMenuOpen = false;
+            if (localMediaStream && localMediaStream.getVideoTracks().length > 0) {
+              localMediaStream.getVideoTracks().forEach(t => { t.enabled = ui.activeCall.camOn; });
+            } else if (ui.activeCall.camOn) {
+              tryStartLocalCamera();
+            }
             renderCallOverlay();
           }
         } else if (action === 'end-call') {
@@ -8972,6 +9620,31 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               showToast('UPI QR code shared in ' + targetChat.name);
             }
           }
+        } else if (action === 'toggle-notif-pref') {
+          ensureSecurityDefaults();
+          const k = btn.dataset.key;
+          if (k) {
+            const cur = state.security.notifPrefs[k] !== false;
+            state.security.notifPrefs[k] = !cur;
+            persistCurrentVault();
+            render();
+            showToast((!cur ? 'Enabled ' : 'Muted ') + k + ' alerts');
+          }
+        } else if (action === 'enable-push-notifs') {
+          (async () => {
+            try {
+              if (typeof Notification === 'undefined') { showToast('Notifications not supported in this browser'); return; }
+              const perm = await Notification.requestPermission();
+              if (perm === 'granted') {
+                const vk = SHAVLO_VAPID_PUBLIC_KEY || (() => { try { return localStorage.getItem('shavlo_vapid_pub_v1') || ''; } catch (e) { return ''; } })();
+                if (vk) await subscribeToWebPush(vk);
+                showToast('Notifications enabled');
+              } else {
+                showToast('Enable notifications in browser/phone Settings');
+              }
+              render();
+            } catch (_) { showToast('Could not enable notifications'); }
+          })();
         } else if (action === 'remove-session') {
           const sid = btn.dataset.id;
           if (sid) {
@@ -9178,7 +9851,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           renderModal();
         } else if (action === 'ctx-pin') {
           const c = state.chats.find(x => x.id === btn.dataset.id);
-          if (c) { c.pinned = !c.pinned; persistCurrentVault(); showToast(c.pinned ? 'Chat pinned' : 'Chat unpinned'); }
+          if (btn && btn.dataset && btn.dataset.id) togglePinChat(btn.dataset.id);
           ui.modal = null; ui.contextMenuChatId = null; render();
         } else if (action === 'ctx-mute') {
           const c = state.chats.find(x => x.id === btn.dataset.id);
@@ -9213,9 +9886,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             showToast('Chat deleted');
           }
           ui.modal = null; ui.contextMenuChatId = null; render();
+        } else if (action === 'swipe-pin') {
+          togglePinChat(btn.dataset.id);
+          ui.swipedChatId = null;
+          render();
         } else if (action === 'row-pin') {
-          const c = state.chats.find(x => x.id === btn.dataset.id);
-          if (c) { c.pinned = !c.pinned; persistCurrentVault(); render(); showToast(c.pinned ? 'Chat pinned' : 'Chat unpinned'); }
+          togglePinChat(btn.dataset.id);
+          render();
+          if (ui.modal === 'contactMenu') renderModal();
         } else if (action === 'row-mute' || action === 'swipe-mute') {
           toggleMuteChat(btn.dataset.id);
           ui.swipedChatId = null;
@@ -9501,6 +10179,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           persistCurrentVault();
           registerCurrentUserInDirectory();
           pushUserToSupabase();
+          broadcastProfileFast();
           ui.modal = null;
           render();
           renderModal();
@@ -9598,7 +10277,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           e.preventDefault();
           ensureSecurityDefaults();
           const pin = String(new FormData(e.target).get('pin') || '').replace(/\D/g, '');
-          if (pin.length === 4 && hashPin(pin) === state.security.masterPinHash) {
+          if (pin.length === 4 && verifyPinHash(pin, state.security.masterPinHash)) {
             ui.vaultLocked = false;
             ui.pinError = '';
             renderLockOverlay();
@@ -10179,7 +10858,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             suppressNextChatClick = true;
             setTimeout(() => { suppressNextChatClick = false; }, 320);
             if (finalX <= -36) {
-              el.style.transform = 'translateX(-170px)';
+              el.style.transform = 'translateX(-222px)';
               ui.swipedChatId = cid;
               triggerHaptic(10);
             } else {
@@ -10313,6 +10992,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           clearTimeout(walkieDemoTimer);
           ui.walkieSpeaking = true;
           ui.walkiePeerSpeaking = false;
+          broadcastWalkieState(ui.walkieChatId || (getSelectedChat() && getSelectedChat().id), true, true);
           startWalkieCapture();
           triggerHaptic(10);
           playSubtleTone('walkie_on');
@@ -10425,19 +11105,20 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (walkiePttActive) {
           walkiePttActive = false;
           ui.walkieSpeaking = false;
-          stopAndBroadcastWalkie(ui.walkieChatId || (getSelectedChat() && getSelectedChat().id));
+          const activeRoom = ui.walkieChatId || (getSelectedChat() && getSelectedChat().id);
+          broadcastWalkieState(activeRoom, true, false);
+          stopAndBroadcastWalkie(activeRoom);
           playSubtleTone('walkie_off');
           const chat = getSelectedChat();
           if (!isCancel && chat && !chat.isPeer) {
             ui.walkiePeerSpeaking = true;
             render();
             walkieDemoTimer = setTimeout(() => {
-              if (ui.walkieActive) {
-                stopWalkieTalkie();
-              }
+              ui.walkiePeerSpeaking = false;
+              if (ui.walkieActive) render();
             }, 1300);
           } else {
-            stopWalkieTalkie();
+            render();
           }
         }
       }
@@ -10487,7 +11168,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           suppressNextChatClick = true;
           setTimeout(() => { suppressNextChatClick = false; }, 220);
           if (finalX <= -36) {
-            el.style.transform = 'translateX(-170px)';
+            el.style.transform = 'translateX(-222px)';
             ui.swipedChatId = cid;
           } else {
             el.style.transform = 'translateX(0px)';
@@ -10717,7 +11398,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           persistCurrentVault();
           registerCurrentUserInDirectory();
           render();
-          showToast('Uploading profile photo...');
+          showToast('Profile photo updated');
           uploadMediaToSupabaseStorage(localDataUrl, 'avatars', 'jpg').then((cdnUrl) => {
             if (cdnUrl && /^https?:/i.test(cdnUrl)) {
               if (prevAvatarUrl && prevAvatarUrl !== cdnUrl) deleteMediaFromSupabaseStorage(prevAvatarUrl);
@@ -10726,13 +11407,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               persistCurrentVault();
               registerCurrentUserInDirectory();
               pushUserToSupabase();
+              broadcastProfileFast();
               render();
-              showToast('Profile photo synced to Supabase');
             } else {
               pushUserToSupabase();
-              showToast('Profile photo saved locally');
+              broadcastProfileFast();
             }
-          });
+          }).catch(() => {});
         };
         img.src = ca.src;
       }
@@ -11159,6 +11840,69 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           if (statusEl) statusEl.textContent = 'Camera permission denied — tap Upload QR Photo below.';
         }
       }
+
+      let _callSwipeStartY = 0;
+      let _callPipDrag = null;
+      document.addEventListener('pointerdown', (e) => {
+        const wrap = document.getElementById('call-overlay-wrap');
+        if (!wrap || !ui.activeCall || ui.activeCall.type !== 'video') return;
+        if (e.target && e.target.closest('button')) return;
+        if (ui.activeCall.pip && wrap.contains(e.target)) {
+          const r = wrap.getBoundingClientRect();
+          _callPipDrag = { startX: e.clientX, startY: e.clientY, origLeft: r.left, origTop: r.top, moved: false };
+          wrap.style.transition = 'none';
+          wrap.style.right = 'auto';
+          wrap.style.bottom = 'auto';
+          wrap.style.left = r.left + 'px';
+          wrap.style.top = r.top + 'px';
+        } else if (!ui.activeCall.pip && wrap.contains(e.target)) {
+          _callSwipeStartY = e.clientY;
+        }
+      });
+      document.addEventListener('pointermove', (e) => {
+        const wrap = document.getElementById('call-overlay-wrap');
+        if (!wrap || !ui.activeCall) return;
+        if (_callPipDrag && ui.activeCall.pip) {
+          const dx = e.clientX - _callPipDrag.startX;
+          const dy = e.clientY - _callPipDrag.startY;
+          if (Math.abs(dx) > 5 || Math.abs(dy) > 5) _callPipDrag.moved = true;
+          wrap.style.left = Math.max(8, Math.min(window.innerWidth - wrap.offsetWidth - 8, _callPipDrag.origLeft + dx)) + 'px';
+          wrap.style.top = Math.max(12, Math.min(window.innerHeight - wrap.offsetHeight - 12, _callPipDrag.origTop + dy)) + 'px';
+        }
+      });
+      document.addEventListener('pointerup', (e) => {
+        const wrap = document.getElementById('call-overlay-wrap');
+        if (_callPipDrag && ui.activeCall && ui.activeCall.pip) {
+          const wasMoved = _callPipDrag.moved;
+          _callPipDrag = null;
+          if (!wasMoved) {
+            ui.activeCall.pip = false;
+            renderCallOverlay();
+          } else if (wrap) {
+            const r = wrap.getBoundingClientRect();
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            const isLeft = cx < window.innerWidth / 2;
+            const isTop = cy < window.innerHeight / 2;
+            ui.activeCall.pipCorner = (isTop ? 't' : 'b') + (isLeft ? 'l' : 'r');
+            wrap.style.left = '';
+            wrap.style.top = '';
+            wrap.style.right = '';
+            wrap.style.bottom = '';
+            renderCallOverlay();
+          }
+          return;
+        }
+        if (_callSwipeStartY && ui.activeCall && ui.activeCall.type === 'video' && !ui.activeCall.pip) {
+          const dy = e.clientY - _callSwipeStartY;
+          _callSwipeStartY = 0;
+          if (dy > 58) {
+            ui.activeCall.pip = true;
+            ui.activeCall.muteMenuOpen = false;
+            renderCallOverlay();
+          }
+        }
+      });
     })();
   </script>
 </body>

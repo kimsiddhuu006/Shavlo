@@ -1,5 +1,5 @@
 // shavlo v1.5.0 Service Worker (Network-First Shell + Background Push + Offline Fallback)
-const CACHE_NAME = 'shavlo-shell-v150';
+const CACHE_NAME = 'shavlo-shell-v167';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
