@@ -2907,13 +2907,14 @@
             : '?select=id,room_id,author_id,author_name,payload,created_at,expires_at&order=created_at.desc&limit=150';
 
           const vidEnc = encodeURIComponent(activeVaultId);
-          const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts, upiTxns, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
+          const [users, reqs, friends, groups, msgsRaw, statuses, statusViewsRows, calls, readReceipts, upiTxns, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
             fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=id,from_id,from_name,from_code,to_id,to_name,to_code,created_time&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
             supaFetch('shavlo_groups', 'GET', '?select=id,code,name,description,creator_id,member_ids,admin_ids,created_at,expires_at'),
             supaFetch('shavlo_messages', 'GET', msgQuery),
             fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=id,author_id,author_name,payload,expires_at&expires_at=gt.${Date.now()}`) : Promise.resolve(null),
+            fetchStatuses ? supaFetch('shavlo_status_views', 'GET', '?select=status_id,viewer_id,viewer_name').catch(() => []) : Promise.resolve(null),
             supaFetch('shavlo_calls', 'GET', `?select=room_id,caller_id,caller_name,callee_id,callee_name,call_type,status,started_at&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
             supaFetch('shavlo_read_receipts', 'GET', '?select=room_id,user_id,last_delivered_at,last_read_at').catch(() => []),
             supaFetch('shavlo_upi_txns', 'GET', `?select=id,room_id,sender_id,receiver_id,amount,note,status,created_at&or=(sender_id.eq.${vidEnc},receiver_id.eq.${vidEnc})&order=created_at.desc&limit=50`).catch(() => []),
@@ -2994,9 +2995,24 @@
           });
           if (statuses !== null) {
             const _recentLocalSt = (net.statuses || []).filter(s => s && s.id && (Date.now() - Number(s.createdAt || 0)) < 15000 && !(statuses || []).some(r => r.id === s.id));
-            net.statuses = [..._recentLocalSt, ...(statuses || []).map(st => Object.assign({}, st.payload, {
-              id: st.id, authorId: st.author_id, authorName: st.author_name, expiresAt: st.expires_at
-            }))];
+            const viewMap = new Map();
+            (Array.isArray(statusViewsRows) ? statusViewsRows : []).forEach(v => {
+              if (!v || !v.status_id || !v.viewer_id) return;
+              if (!viewMap.has(v.status_id)) viewMap.set(v.status_id, []);
+              viewMap.get(v.status_id).push(v);
+            });
+            net.statuses = [..._recentLocalSt, ...(statuses || []).map(st => {
+              const merged = Object.assign({}, st.payload, {
+                id: st.id, authorId: st.author_id, authorName: st.author_name, expiresAt: st.expires_at
+              });
+              merged.seenBy = Array.isArray(merged.seenBy) ? [...merged.seenBy] : [];
+              merged.seenNames = merged.seenNames || {};
+              (viewMap.get(st.id) || []).forEach(v => {
+                if (!merged.seenBy.includes(v.viewer_id)) merged.seenBy.push(v.viewer_id);
+                if (v.viewer_name) merged.seenNames[v.viewer_id] = v.viewer_name;
+              });
+              return merged;
+            })];
           }
           net.activeCalls = {};
           (calls || []).forEach(c => {
@@ -3239,6 +3255,32 @@
                 } catch (_) {}
               })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_blocks' }, () => scheduleSupaSync(200))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_sessions' }, (change) => {
+                try {
+                  if (change && change.eventType === 'DELETE' && change.old && change.old.id) {
+                    ui.activeSessions = (ui.activeSessions || []).filter(s => s.id !== change.old.id);
+                    safeBackgroundRender();
+                    return;
+                  }
+                  if (change && change.new && change.new.vault_id === activeVaultId) {
+                    scheduleSupaSync(200);
+                    return;
+                  }
+                } catch (_) {}
+              })
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_vault_items' }, (change) => {
+                try {
+                  if (change && change.eventType === 'DELETE' && change.old && change.old.id && state && state.security) {
+                    state.security.shavloVaultItems = (state.security.shavloVaultItems || []).filter(x => x.id !== change.old.id);
+                    persistCurrentVault();
+                    if (ui.secretVaultWindowOpen) render();
+                    return;
+                  }
+                  if (change && change.new && change.new.vault_id === activeVaultId) {
+                    scheduleSupaSync(200);
+                  }
+                } catch (_) {}
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_status_views' }, (change) => {
                 try {
                   if (change && change.new && change.new.status_id && change.new.viewer_id) {
@@ -3782,6 +3824,7 @@
         statusDraftText: '',
         statusDraftPhoto: '',
         statusDraftBg: 'from-[#111113] to-[#4F46E5]',
+        statusStudio: null,
         youTab: 'account',
         editingMsgId: null,
         editingReqId: null,
@@ -3825,6 +3868,7 @@
         updatesSearchQuery: '',
         callsSearchQuery: '',
         secretVaultUnlocked: false,
+        secretVaultWindowOpen: false,
         secretPinError: '',
         pendingUnlockChatId: null,
         cropAvatar: null,
@@ -6474,28 +6518,29 @@
         const mode = authState.mode === 'login' ? 'login' : 'signup';
         return `
           <div class="relative h-dvh w-full bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden flex flex-col justify-between">
-            <header style="padding-top:max(3rem, env(safe-area-inset-top));" class="w-full max-w-5xl mx-auto px-5 pb-1 flex items-center justify-between shrink-0">
-              <span class="title-display text-[32px] sm:text-[38px] font-extrabold tracking-[-0.04em] leading-[1.05] text-ink dark:text-white">shavlo<span class="text-[#C6A76D]">.</span></span>
-            </header>
+            <div class="pointer-events-none absolute -top-28 left-1/2 -translate-x-1/2 w-[520px] h-[320px] rounded-full bg-[#C6A76D]/12 dark:bg-[#C6A76D]/10 blur-3xl"></div>
 
-            <main class="flex-1 min-h-0 flex flex-col items-center justify-center px-4 py-1 overflow-y-auto thin-scroll">
-              <div class="w-full max-w-[400px] animate-fade my-auto">
-                <div class="text-center mb-3">
-                  <h1 class="title-display text-[24px] sm:text-[28px] font-extrabold tracking-[-0.035em] leading-[1.12] text-ink dark:text-white">
-                    Simple, <span class="text-[#C6A76D]">private</span> messaging.
+            <main class="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center px-5 py-6 overflow-y-auto thin-scroll">
+              <div class="w-full max-w-[400px] animate-fade my-auto space-y-5">
+                <div class="text-center space-y-1.5">
+                  <div class="title-display text-[38px] sm:text-[42px] font-extrabold tracking-[-0.045em] leading-none text-ink dark:text-white">
+                    shavlo<span class="text-[#C6A76D]">.</span>
+                  </div>
+                  <h1 class="title-display text-[19px] sm:text-[21px] font-bold tracking-[-0.025em] text-ink/85 dark:text-white/90">
+                    Private messages, calls &amp; UPI
                   </h1>
-                  <p class="text-[12.5px] font-medium tracking-[-0.01em] text-muted dark:text-zinc-400 mt-1">
-                    8-word seed phrase • <span class="text-[#C6A76D]">Porcelain &amp; Obsidian</span>
+                  <p class="text-[12.5px] font-medium tracking-[-0.01em] text-muted dark:text-zinc-400">
+                    End-to-end encrypted • 8-word recovery key
                   </p>
                 </div>
 
-                <div class="ios-card bg-white/95 dark:bg-[#121215]/95 backdrop-blur-md rounded-[32px] border border-[#C6A76D]/25 dark:border-[#C6A76D]/25 p-4 sm:p-5 shadow-sm">
+                <div class="ios-card bg-white/95 dark:bg-[#121215]/95 backdrop-blur-xl rounded-[32px] border border-black/[0.06] dark:border-white/[0.1] p-5 sm:p-6 shadow-[0_24px_64px_-20px_rgba(9,9,12,0.14)]">
                   <!-- Sleek 2-Tab Pill Switcher -->
                   <div class="grid grid-cols-2 p-1 rounded-full bg-black/[0.045] dark:bg-white/[0.07] border border-black/[0.05] dark:border-white/[0.08] mb-4">
-                    <button data-action="auth-mode" data-mode="signup" class="py-2 rounded-full text-[13px] font-semibold tracking-[-0.01em] transition-all duration-200 ${mode === 'signup' ? 'bg-ink text-white dark:bg-white dark:text-ink shadow-sm ring-1 ring-[#C6A76D]/60' : 'text-muted hover:text-ink dark:hover:text-white'}">
+                    <button type="button" data-action="auth-mode" data-mode="signup" class="py-2 rounded-full text-[13px] font-semibold tracking-[-0.01em] transition-all duration-200 ${mode === 'signup' ? 'bg-ink text-white dark:bg-white dark:text-ink shadow-sm ring-1 ring-[#C6A76D]/60' : 'text-muted hover:text-ink dark:hover:text-white'}">
                       Sign Up
                     </button>
-                    <button data-action="auth-mode" data-mode="login" class="py-2 rounded-full text-[13px] font-semibold tracking-[-0.01em] transition-all duration-200 ${mode === 'login' ? 'bg-ink text-white dark:bg-white dark:text-ink shadow-sm ring-1 ring-[#C6A76D]/60' : 'text-muted hover:text-ink dark:hover:text-white'}">
+                    <button type="button" data-action="auth-mode" data-mode="login" class="py-2 rounded-full text-[13px] font-semibold tracking-[-0.01em] transition-all duration-200 ${mode === 'login' ? 'bg-ink text-white dark:bg-white dark:text-ink shadow-sm ring-1 ring-[#C6A76D]/60' : 'text-muted hover:text-ink dark:hover:text-white'}">
                       Sign In
                     </button>
                   </div>
@@ -6508,99 +6553,12 @@
 
                   ${mode === 'signup' ? renderSignupSteps() : renderLoginForm()}
                 </div>
-              </div>
-            </main>
 
-            <!-- Try Demo Button cleanly above the sketch on the right + Full-Width India Sketch -->
-            <footer class="relative shrink-0 w-full">
-              <div style="padding-bottom:max(0.85rem, env(safe-area-inset-bottom));" class="group relative w-full bg-gradient-to-t from-black/[0.04] via-transparent to-transparent dark:from-white/[0.035] px-3 sm:px-6 pt-2">
-                <svg viewBox="0 0 720 124" preserveAspectRatio="xMidYMax meet" class="w-full h-[96px] sm:h-[124px] text-ink dark:text-white" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <!-- Continuous Champagne Gold Orbital Arc connecting Moon Landing to India Skyline -->
-                  <path d="M38 44 Q 260 -10 682 42" stroke="#C6A76D" stroke-dasharray="3.5 3.5" stroke-width="1.25" opacity="0.8"/>
-
-                  <!-- 1. Chandrayaan-3 Lunar South Pole (Left) -->
-                  <g class="transition-transform duration-300 group-hover:-translate-y-0.5">
-                    <circle cx="152" cy="30" r="15" stroke="#C6A76D" stroke-width="1.3" opacity="0.85"/>
-                    <circle cx="147" cy="26" r="2.2" stroke="#C6A76D" stroke-width="1.1"/>
-                    <circle cx="157" cy="34" r="3" stroke="#C6A76D" stroke-width="1.1"/>
-                    <path d="M22 108 Q 92 92 164 108" stroke-width="1.6"/>
-                    <!-- Indian Flag on Moon -->
-                    <line x1="48" y1="73" x2="48" y2="101"/>
-                    <rect x="48" y="73" width="16" height="10" rx="1" stroke="#C6A76D"/>
-                    <line x1="48" y1="76.3" x2="64" y2="76.3" stroke="#C6A76D" stroke-width="1"/>
-                    <line x1="48" y1="79.7" x2="64" y2="79.7" stroke="#C6A76D" stroke-width="1"/>
-                    <circle cx="56" cy="78" r="1.4" stroke="#C6A76D" stroke-width="1"/>
-                    <!-- Vikram Lander -->
-                    <rect x="76" y="69" width="24" height="16" rx="2.5" fill="currentColor" fill-opacity="0.06"/>
-                    <rect x="81" y="62" width="14" height="7" rx="1.5"/>
-                    <line x1="77" y1="85" x2="68" y2="99"/>
-                    <line x1="99" y1="85" x2="108" y2="99"/>
-                    <line x1="88" y1="85" x2="88" y2="98"/>
-                    <!-- Pragyan Rover -->
-                    <rect x="116" y="88" width="16" height="8" rx="1.5"/>
-                    <circle cx="119" cy="98" r="2.2"/>
-                    <circle cx="129" cy="98" r="2.2"/>
-                  </g>
-
-                  <!-- 2. Taj Mahal (Center-Left) -->
-                  <g class="transition-transform duration-300 group-hover:-translate-y-0.5">
-                    <line x1="274" y1="28" x2="274" y2="38" stroke="#C6A76D" stroke-width="1.7"/>
-                    <path d="M254 62 C254 44, 266 38, 274 38 C282 38, 294 44, 294 62 Z" fill="currentColor" fill-opacity="0.06"/>
-                    <rect x="253" y="62" width="42" height="4" rx="1"/>
-                    <path d="M238 69 C238 60, 246 60, 246 69 Z"/>
-                    <path d="M302 69 C302 60, 310 60, 310 69 Z"/>
-                    <rect x="235" y="69" width="78" height="39" rx="1"/>
-                    <path d="M264 108 V86 C264 77, 284 77, 284 86 V108"/>
-                    <path d="M243 87 V78 C243 75, 249 75, 249 78 V87"/>
-                    <path d="M299 87 V78 C299 75, 305 75, 305 78 V87"/>
-                    <path d="M214 108 L216 54 L220 54 L222 108"/>
-                    <path d="M225 108 L226.5 64 L229.5 64 L231 108"/>
-                    <path d="M317 108 L318.5 64 L321.5 64 L323 108"/>
-                    <path d="M326 108 L328 54 L332 54 L334 108"/>
-                    <path d="M258 113 H290" stroke="#C6A76D" stroke-width="1.3"/>
-                  </g>
-
-                  <!-- 3. PM Modi ji Medallion & Namaste (Center-Right) -->
-                  <g class="transition-transform duration-300 group-hover:-translate-y-0.5">
-                    <circle cx="436" cy="63" r="41" stroke="#C6A76D" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.9"/>
-                    <path d="M423 53 C423 39, 449 39, 449 53 C449 59, 448 63, 447 67 C445 76, 441 80, 436 80 C431 80, 427 76, 425 67 C424 63, 423 59, 423 53 Z" fill="currentColor" fill-opacity="0.04"/>
-                    <path d="M423 50 C424 40, 448 40, 449 50" stroke-width="1.9"/>
-                    <rect x="426" y="53" width="8.5" height="5.5" rx="2"/>
-                    <rect x="437.5" y="53" width="8.5" height="5.5" rx="2"/>
-                    <line x1="434.5" y1="55.5" x2="437.5" y2="55.5"/>
-                    <path d="M430 65 Q 436 63 442 65" stroke-width="1.3"/>
-                    <path d="M426 68 C428 78, 444 78, 446 68" stroke-width="1.7"/>
-                    <path d="M408 104 C410 89, 422 83, 430 82 L436 93 L442 82 C450 83, 462 89, 464 104" fill="currentColor" fill-opacity="0.06"/>
-                    <path d="M432 103 L436 87 L440 103" stroke="#C6A76D" stroke-width="1.6"/>
-                    <line x1="436" y1="87" x2="436" y2="103" stroke="#C6A76D" stroke-width="1.2"/>
-                  </g>
-
-                  <!-- 4. India Gate, Ashoka Chakra, Lotus & Diya (Right) -->
-                  <g class="transition-transform duration-300 group-hover:-translate-y-0.5">
-                    <circle cx="584" cy="24" r="8" stroke="#C6A76D" stroke-width="1.3"/>
-                    <line x1="584" y1="16" x2="584" y2="32" stroke="#C6A76D" stroke-width="1"/>
-                    <line x1="576" y1="24" x2="592" y2="24" stroke="#C6A76D" stroke-width="1"/>
-                    <line x1="578" y1="18" x2="590" y2="30" stroke="#C6A76D" stroke-width="1"/>
-                    <line x1="590" y1="18" x2="578" y2="30" stroke="#C6A76D" stroke-width="1"/>
-                    <rect x="548" y="42" width="72" height="9" rx="1"/>
-                    <rect x="554" y="51" width="60" height="57"/>
-                    <path d="M571 108 V76 C571 64, 597 64, 597 76 V108" fill="currentColor" fill-opacity="0.05"/>
-                    <!-- Lotus -->
-                    <path d="M520 108 C514 100, 515 91, 520 86 C525 91, 526 100, 520 108 Z" fill="currentColor" fill-opacity="0.06"/>
-                    <path d="M520 108 C509 106, 507 98, 512 93 C516 97, 518 102, 520 108"/>
-                    <path d="M520 108 C531 106, 533 98, 528 93 C524 97, 522 102, 520 108"/>
-                    <!-- Diya -->
-                    <path d="M642 101 Q 654 109 666 101 Q 654 97 642 101 Z" fill="currentColor" fill-opacity="0.08"/>
-                    <path d="M654 97 C650 91, 654 84, 654 84 C654 84, 658 91, 654 97 Z" stroke="#C6A76D" fill="#C6A76D" fill-opacity="0.4"/>
-                  </g>
-                </svg>
-                <div class="flex items-center justify-center gap-2 text-[10px] text-muted mt-1 whitespace-nowrap overflow-hidden">
-                  <span class="font-semibold tracking-wider uppercase shrink-0">Crafted in India</span>
-                  <span class="opacity-40">•</span>
-                  <span class="text-[#C6A76D] font-medium truncate">Chandrayaan-3 • Taj Mahal • PM Modi ji • India Gate</span>
+                <div style="padding-bottom:max(0.25rem, env(safe-area-inset-bottom));" class="text-center text-[11.5px] font-medium text-muted/80">
+                  Zero phone numbers • Private by design
                 </div>
               </div>
-            </footer>
+            </main>
           </div>
         `;
       }
@@ -6656,7 +6614,6 @@
             <form id="signup-verify-form" class="space-y-3.5">
               <div class="flex items-center justify-between">
                 <span class="title-display text-[13.5px] font-bold tracking-[-0.015em] text-ink dark:text-white">Confirm 3 seed words</span>
-                <button type="button" data-action="autofill-verify" class="text-[12.5px] font-semibold text-ink dark:text-white underline underline-offset-2">Auto-fill</button>
               </div>
               <div class="grid grid-cols-3 gap-2">
                 ${authState.verifyIndices.map((wordIdx, pos) => `
@@ -6856,20 +6813,24 @@
       }
 
       // UPDATES TAB — 24-Hour Statuses & Updates
-      function renderSegmentedStatusRing(count, isSeen) {
-        const n = Math.max(0, Number(count || 0));
+      function renderSegmentedStatusRing(countOrStates, isSeen) {
+        const states = Array.isArray(countOrStates)
+          ? countOrStates.map(Boolean)
+          : Array.from({ length: Math.max(0, Number(countOrStates || 0)) }, () => Boolean(isSeen));
+        const n = states.length;
         if (n === 0) return '';
         const r = 29;
         const c = 2 * Math.PI * r;
-        const strokeCls = isSeen ? 'stroke-zinc-300 dark:stroke-zinc-700' : 'stroke-[#09090C] dark:stroke-white';
         if (n === 1) {
+          const strokeCls = states[0] ? 'stroke-zinc-300 dark:stroke-zinc-700' : 'stroke-[#09090C] dark:stroke-white';
           return `<svg viewBox="0 0 64 64" class="pointer-events-none absolute -inset-[4px] w-[64px] h-[64px]" aria-hidden="true"><circle cx="32" cy="32" r="${r}" fill="none" stroke-width="2.6" class="${strokeCls}"/></svg>`;
         }
         const gap = n >= 8 ? 4.5 : (n >= 4 ? 5.5 : 6.5);
         const dash = Math.max(3.5, (c / n) - gap);
         const step = dash + gap;
-        const arcs = Array.from({ length: n }, (_, i) => {
+        const arcs = states.map((segSeen, i) => {
           const offset = -(i * step);
+          const strokeCls = segSeen ? 'stroke-zinc-300 dark:stroke-zinc-700' : 'stroke-[#09090C] dark:stroke-white';
           return `<circle cx="32" cy="32" r="${r}" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="${dash.toFixed(2)} ${(c - dash).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" class="${strokeCls}"/>`;
         }).join('');
         return `<svg viewBox="0 0 64 64" style="transform:rotate(-90deg);" class="pointer-events-none absolute -inset-[4px] w-[64px] h-[64px]" aria-hidden="true">${arcs}</svg>`;
@@ -6883,7 +6844,7 @@
 
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
               <div class="md:hidden">${renderTopBrandHeader()}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-5">
                 <div class="flex items-center justify-between mb-3.5">
@@ -6921,9 +6882,10 @@
                       </div>
                     </button>
                     <div class="flex items-center gap-2 shrink-0">
-                      <button type="button" data-action="open-modal" data-modal="newStatus" title="Add photo status" class="w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white hover:bg-ink hover:text-white dark:hover:bg-white dark:hover:text-ink flex items-center justify-center transition">
+                      <label for="status-studio-gallery-input" title="Camera &amp; Gallery Status" class="w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white hover:bg-ink hover:text-white dark:hover:bg-white dark:hover:text-ink flex items-center justify-center cursor-pointer transition">
                         ${icon('camera', 'w-[18px] h-[18px]')}
-                      </button>
+                        <input id="status-studio-gallery-input" type="file" accept="image/*" class="sr-only" />
+                      </label>
                       <button type="button" data-action="open-modal" data-modal="newStatus" title="Write text status" class="w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white hover:bg-ink hover:text-white dark:hover:bg-white dark:hover:text-ink flex items-center justify-center transition">
                         ${icon('edit', 'w-[17px] h-[17px]')}
                       </button>
@@ -6931,41 +6893,59 @@
                   </div>
                 </div>
 
-                <!-- Recent Updates -->
-                <div>
-                  <h2 class="title-display text-[15px] font-bold tracking-[-0.02em] text-muted mb-2.5">Recent updates (${others.length})</h2>
-                  ${others.length === 0 ? `
-                    <div class="py-12 flex flex-col items-center justify-center text-center">
-                      <div class="w-14 h-14 rounded-2xl bg-brand-50 dark:bg-brand-600/15 text-brand-500 flex items-center justify-center mb-3">${icon('updates', 'w-6 h-6')}</div>
-                      <div class="title-display text-[16px] font-bold tracking-[-0.02em]">No recent updates</div>
-                      <p class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted mt-1">24-hour statuses from your contacts appear here.</p>
-                    </div>
-                  ` : `
+                <!-- Recent Updates (grouped per contact with real-time segmented ring) -->
+                ${(() => {
+                  const byAuthorMap = new Map();
+                  others.forEach(st => {
+                    const key = st.authorId || st.authorName || st.id;
+                    if (!byAuthorMap.has(key)) byAuthorMap.set(key, []);
+                    byAuthorMap.get(key).push(st);
+                  });
+                  const authorGroups = Array.from(byAuthorMap.values()).map(items => {
+                    const sorted = items.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    const latest = sorted[0];
+                    const seenStates = sorted.map(s => Boolean(s.seen || (Array.isArray(s.seenBy) && s.seenBy.includes(activeVaultId))));
+                    const firstUnseen = sorted.find(s => !(s.seen || (Array.isArray(s.seenBy) && s.seenBy.includes(activeVaultId)))) || latest;
+                    return { items: sorted, latest, seenStates, openId: firstUnseen.id };
+                  });
+                  return `
                     <div>
-                      ${others.map((st, idx) => {
-                        const seen = st.seen || (Array.isArray(st.seenBy) && st.seenBy.includes(activeVaultId));
-                        return `
-                          <button data-action="open-status" data-id="${st.id}" class="w-full py-3.5 flex items-center justify-between gap-3 text-left hover:bg-surface/60 dark:hover:bg-zinc-900/60 rounded-2xl px-2 transition">
-                            <div class="flex items-center gap-3.5 min-w-0">
-                              <div class="relative shrink-0 w-14 h-14">
-                                ${renderSegmentedStatusRing(others.filter(x => x.authorId === st.authorId).length, seen)}
-                                <div class="w-14 h-14 rounded-full overflow-hidden p-[1.5px] bg-[#FAFAFC] dark:bg-[#0B0B0D]">
-                                  ${renderAvatar(st.avatarText, safeImgUrl(st.photoUrl) || st.avatarUrl, 'w-full h-full text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+                      <h2 class="title-display text-[15px] font-bold tracking-[-0.02em] text-muted mb-2.5">Recent updates (${authorGroups.length})</h2>
+                      ${authorGroups.length === 0 ? `
+                        <div class="py-12 flex flex-col items-center justify-center text-center">
+                          <div class="w-14 h-14 rounded-2xl bg-brand-50 dark:bg-brand-600/15 text-brand-500 flex items-center justify-center mb-3">${icon('updates', 'w-6 h-6')}</div>
+                          <div class="title-display text-[16px] font-bold tracking-[-0.02em]">No recent updates</div>
+                          <p class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted mt-1">24-hour statuses from your contacts appear here.</p>
+                        </div>
+                      ` : `
+                        <div>
+                          ${authorGroups.map((grp, idx) => {
+                            const st = grp.latest;
+                            const cnt = grp.items.length;
+                            return `
+                              <button data-action="open-status" data-id="${grp.openId}" class="w-full py-3.5 flex items-center justify-between gap-3 text-left hover:bg-surface/60 dark:hover:bg-zinc-900/60 rounded-2xl px-2 transition">
+                                <div class="flex items-center gap-3.5 min-w-0">
+                                  <div class="relative shrink-0 w-14 h-14">
+                                    ${renderSegmentedStatusRing(grp.seenStates)}
+                                    <div class="w-14 h-14 rounded-full overflow-hidden p-[1.5px] bg-[#FAFAFC] dark:bg-[#0B0B0D]">
+                                      ${renderAvatar(st.avatarText, safeImgUrl(st.photoUrl) || st.avatarUrl, 'w-full h-full text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+                                    </div>
+                                  </div>
+                                  <div class="min-w-0">
+                                    <div class="title-display text-[16px] font-bold tracking-[-0.02em] text-ink dark:text-white truncate">${escapeHtml(st.authorName)}</div>
+                                    <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted truncate">${cnt > 1 ? `${cnt} updates • ` : ''}${escapeHtml(st.text || 'Photo update')}</div>
+                                  </div>
                                 </div>
-                              </div>
-                              <div class="min-w-0">
-                                <div class="title-display text-[16px] font-bold tracking-[-0.02em] text-ink dark:text-white truncate">${escapeHtml(st.authorName)}</div>
-                                <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted truncate">${escapeHtml(st.text || 'Photo update')}</div>
-                              </div>
-                            </div>
-                            <span class="text-[11.5px] font-medium tabular-nums tracking-[-0.01em] text-muted/85 shrink-0">${formatRemaining24h(st.expiresAt)}</span>
-                          </button>
-                          ${idx < others.length - 1 ? '<div class="ml-[70px] mr-2 h-px bg-black/[0.065] dark:bg-white/[0.08]"></div>' : ''}
-                        `;
-                      }).join('')}
+                                <span class="text-[11.5px] font-medium tabular-nums tracking-[-0.01em] text-muted/85 shrink-0">${formatRemaining24h(st.expiresAt)}</span>
+                              </button>
+                              ${idx < authorGroups.length - 1 ? '<div class="ml-[70px] mr-2 h-px bg-black/[0.065] dark:bg-white/[0.08]"></div>' : ''}
+                            `;
+                          }).join('')}
+                        </div>
+                      `}
                     </div>
-                  `}
-                </div>
+                  `;
+                })()}
               </div>
             </main>
           </div>
@@ -6984,7 +6964,7 @@
 
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
               <div class="md:hidden">${renderTopBrandHeader()}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-5">
                 <div class="flex items-center justify-between mb-3.5">
@@ -7094,7 +7074,7 @@
         const history = (state.callHistory || []).filter(h => !cq || h.name.toLowerCase().includes(cq));
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
               <div class="md:hidden">${renderTopBrandHeader()}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-5">
                 <div class="flex items-center justify-between mb-3.5">
@@ -7159,12 +7139,12 @@
           <div class="flex-1 flex h-full min-h-0 overflow-hidden bg-[#FAFAFC] dark:bg-[#0B0B0D]">
             <!-- Chat List Column -->
             <section class="${listMobileCls} flex-col w-full md:w-[340px] lg:w-[360px] shrink-0 border-r border-zinc-100 dark:border-zinc-900 h-full min-h-0 overflow-hidden">
-              <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20">
+              <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
                 <div class="md:hidden">${renderTopBrandHeader()}</div>
                 <div class="px-5 pt-2 md:pt-7 pb-4">
                   <div class="flex items-center justify-between mb-4">
                     <h1 data-action="scroll-top" data-target="chats-scroll" title="Tap to scroll to top" class="title-display text-[34px] sm:text-[38px] font-extrabold tracking-[-0.035em] leading-[1.08] text-ink dark:text-white cursor-pointer select-none">Chats</h1>
-                    <button data-action="open-friends-hub" title="Friends &amp; Requests" class="relative h-10 px-4 rounded-full bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold shadow-sm inline-flex items-center gap-1.5 transition">
+                    <button data-action="open-friends-hub" title="Friends &amp; Requests" class="relative h-10 px-4 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold shadow-[0_8px_20px_-6px_rgba(9,9,12,0.3)] border border-[#C6A76D]/35 inline-flex items-center gap-1.5 hover:opacity-90 transition">
                       ${icon('userAdd', 'w-[17px] h-[17px]')}
                       <span>Friends</span>
                       ${(() => { const n = getNetwork().requests.filter(r => r.toId === activeVaultId).length; return n > 0 ? `<span class="min-w-[18px] h-[18px] px-1 rounded-full bg-white text-zinc-950 text-[10.5px] font-extrabold flex items-center justify-center">${n}</span>` : ''; })()}
@@ -7206,7 +7186,7 @@
                           <span class="text-[10.5px] font-semibold tracking-tight">Ping</span>
                         </button>
                       </div>
-                      <button data-action="select-chat" data-chat-item="${c.id}" data-id="${c.id}" style="touch-action: pan-y; transform: translateX(${isSwiped ? -222 : 0}px); transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);" class="relative z-10 w-full text-left px-3.5 py-3.5 rounded-2xl bg-[#FAFAFC] dark:bg-[#0B0B0D] flex items-center gap-4 select-none ${isSel ? 'md:bg-brand-50 md:dark:bg-brand-600/15' : ''} hover:bg-[#F3F3F7] dark:hover:bg-[#141418]">
+                      <button data-action="select-chat" data-chat-item="${c.id}" data-id="${c.id}" style="touch-action: pan-y; transform: translateX(${isSwiped ? -222 : 0}px); transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);" class="relative z-10 w-full text-left px-3.5 py-3.5 rounded-2xl bg-[#FAFAFC] dark:bg-[#0B0B0D] flex items-center gap-4 select-none ${isSel ? 'md:bg-white/95 md:dark:bg-white/[0.08] md:shadow-[0_6px_20px_-8px_rgba(9,9,12,0.14)] md:border md:border-black/[0.05] md:dark:border-white/[0.08]' : ''} hover:bg-white/70 dark:hover:bg-white/[0.05]">
                         <div class="relative shrink-0" data-chat-av-wrap="${c.id}">
                           ${(ui.ringPingChats && ui.ringPingChats[c.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
                           ${renderAvatar(c.avatarText, c.avatarUrl, 'w-14 h-14 text-[17px] font-bold', c.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
@@ -7250,9 +7230,9 @@
         return `
           <main id="active-chat-main" class="${mobileCls} absolute inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-white dark:bg-[#0B0B0D]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
             <!-- Minimalist Clean White & Black Upper Shelf -->
-            <header style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 border-b border-black/[0.04] dark:border-white/[0.06] ${isPrivateMode ? 'bg-black/95' : 'bg-white/90 dark:bg-[#09090C]/90'} backdrop-blur-md">
+            <header style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 border-b border-black/[0.05] dark:border-white/[0.08] ${isPrivateMode ? 'bg-black/90' : 'bg-white/75 dark:bg-[#09090C]/75'} backdrop-blur-2xl shadow-[0_8px_28px_-14px_rgba(9,9,12,0.14)]">
               <div class="flex items-center gap-3 min-w-0">
-                <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition ${isPrivateMode ? 'bg-white/15 text-white hover:bg-white/20' : 'bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black'}">
+                <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition ${isPrivateMode ? 'bg-white/15 text-white hover:bg-white/20 border border-white/15' : 'glass-pill text-ink dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black'}">
                   ${icon('back', 'w-5 h-5')}
                 </button>
                 <button data-action="open-modal" data-modal="contactMenu" title="Contact info, search &amp; options" class="flex items-center gap-3 min-w-0 text-left rounded-full pr-2 py-0.5 hover:opacity-80 transition">
@@ -7266,7 +7246,7 @@
                 </button>
               </div>
               <!-- Minimalist White & Black Pill for Video & Audio Call -->
-              <div class="h-10 shrink-0 flex items-center gap-1 px-1.5 rounded-full ${isPrivateMode ? 'bg-white/15 border border-white/15' : 'bg-black/[0.05] dark:bg-white/[0.08]'}">
+              <div class="h-10 shrink-0 flex items-center gap-1 px-1.5 rounded-full ${isPrivateMode ? 'bg-white/15 border border-white/15' : 'glass-pill'}">
                 <button data-action="start-call" data-type="video" title="Video Call" class="w-9 h-8 rounded-full flex items-center justify-center transition ${isPrivateMode ? 'text-white hover:bg-white/15' : 'text-ink dark:text-white hover:bg-white dark:hover:bg-black'}">
                   ${icon('video', 'w-[19px] h-[19px]')}
                 </button>
@@ -7294,7 +7274,7 @@
                   </div>
                 ` : `
 ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `<button type="button" data-action="load-older-msgs" data-id="${chat.id}" class="mr-2 px-3 py-1 rounded-full bg-black/[0.06] dark:bg-white/[0.1] text-[11px] font-semibold text-ink dark:text-white hover:opacity-80 transition">${roomOlderLoading[chat.id] ? 'Loading...' : 'Load older'}</button>` : ''}
-                                    <span class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] font-semibold text-muted tracking-tight">Today</span>
+                                    <span class="glass-pill px-3.5 py-1 rounded-full text-[11px] font-semibold text-ink/70 dark:text-white/75 tracking-tight">Today</span>
                 `}
               </div>
               ${(ui.inChatSearchQuery ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase())) : activeMessages).map(m => renderBubble(chat, m)).join('')}
@@ -7305,7 +7285,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 Shoulder Veil On • Double-tap to reveal
               </button>
             ` : ''}
-            <button id="chat-scroll-jump-btn" type="button" data-action="chat-scroll-jump" data-dir="down" aria-label="Jump to bottom or top" class="opacity-0 pointer-events-none translate-y-2 absolute bottom-[92px] right-4 sm:right-6 z-30 w-10 h-10 rounded-full bg-white text-[#09090C] border border-black/10 shadow-[0_4px_16px_-2px_rgba(9,9,12,0.16)] dark:bg-zinc-900 dark:text-white dark:border-white/15 flex items-center justify-center transition-all duration-200 active:scale-95">
+            <button id="chat-scroll-jump-btn" type="button" data-action="chat-scroll-jump" data-dir="down" aria-label="Jump to bottom or top" class="opacity-0 pointer-events-none translate-y-2 absolute bottom-[92px] right-4 sm:right-6 z-30 w-10 h-10 rounded-full glass-pill text-[#09090C] dark:text-white flex items-center justify-center transition-all duration-200 active:scale-95">
               <svg class="w-[18px] h-[18px] transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
             </button>
 
@@ -7774,11 +7754,106 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }
 
       // YOU TAB (Profile, Friend Code, Seed Phrase Vault, UPI Ledger, Appearance, Sign Out)
-      function renderYouTab() {
-        const seedWords = state.userProfile.seedWords || DEMO_SEED;
+      function renderSecretVaultWindow(seedWords) {
+        ensureSecurityDefaults();
+        const hiddenIds = Object.keys((state.security && state.security.secretChatIds) || {});
+        const secretChats = getMergedChats().filter(c => hiddenIds.includes(c.id));
+        const vaultPhotos = (state.security && Array.isArray(state.security.shavloVaultItems)) ? state.security.shavloVaultItems : [];
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20">
+            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20 border-b border-black/[0.06] dark:border-white/[0.08]">
+              <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-[max(1rem,env(safe-area-inset-top))] pb-3.5 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                  <button type="button" data-action="close-secret-vault-window" title="Back to Account" class="w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white flex items-center justify-center shrink-0 transition">
+                    ${icon('back', 'w-5 h-5')}
+                  </button>
+                  <div class="min-w-0">
+                    <h1 class="title-display text-[24px] sm:text-[28px] font-extrabold tracking-[-0.03em] leading-tight text-ink dark:text-white truncate">Secret Vault</h1>
+                    <p class="text-[12px] text-muted">Seed phrase, hidden chats &amp; private media</p>
+                  </div>
+                </div>
+                <button type="button" data-action="lock-secret-vault" class="px-4 py-2 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12.5px] font-bold shrink-0 transition">
+                  Lock
+                </button>
+              </div>
+            </div>
+            <main class="flex-1 min-h-0 overflow-y-auto thin-scroll px-5 sm:px-8 pt-5 pb-28 md:pb-10">
+              <div class="w-full max-w-4xl mx-auto space-y-5">
+                <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3">
+                  <div class="text-[13px] font-bold text-ink dark:text-white">8-word recovery phrase</div>
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    ${seedWords.map((w, idx) => `
+                      <div class="px-3 py-2 rounded-2xl bg-surface dark:bg-zinc-900 text-[12.5px] flex items-center gap-1.5">
+                        <span class="text-[10px] font-sans tabular-nums text-muted">${idx + 1}.</span>
+                        <span class="font-semibold">${escapeHtml(w)}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                  <div class="flex flex-wrap gap-2 pt-1">
+                    <button type="button" data-action="copy-vault-seed" class="px-4 py-2 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12.5px] font-semibold">Copy Seed</button>
+                    <button type="button" data-action="download-vault-seed" class="px-4 py-2 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold">Download .txt</button>
+                  </div>
+                </div>
+
+                <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <div class="text-[13px] font-bold text-ink dark:text-white">Hidden secret chats (${secretChats.length})</div>
+                  </div>
+                  ${secretChats.length === 0 ? `
+                    <p class="text-[12.5px] text-muted">Long-press any chat in Chats and tap <strong>Move to Secret Vault</strong> to hide it here.</p>
+                  ` : secretChats.map(sc => `
+                    <div class="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-surface dark:bg-zinc-900">
+                      <button type="button" data-action="open-peer-chat" data-room="${sc.id}" class="flex items-center gap-2.5 min-w-0 text-left flex-1">
+                        ${renderAvatar(sc.avatarText, sc.avatarUrl, 'w-9 h-9 text-[13px]', 'bg-brand-500 text-white')}
+                        <div class="min-w-0">
+                          <div class="text-[14px] font-semibold truncate">${escapeHtml(sc.name)}</div>
+                          <div class="text-[12px] text-muted truncate">${escapeHtml(getLastPreview(sc))}</div>
+                        </div>
+                      </button>
+                      <button type="button" data-action="toggle-secret-chat" data-id="${sc.id}" class="px-3 py-1 rounded-full bg-white dark:bg-zinc-800 text-[11.5px] font-semibold text-muted hover:text-ink shrink-0">Unhide</button>
+                    </div>
+                  `).join('')}
+                </div>
+
+                <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <div class="text-[13px] font-bold text-ink dark:text-white">Private Vault Media (${vaultPhotos.length})</div>
+                      <div class="text-[11.5px] text-muted">Encrypted &amp; synced to your account</div>
+                    </div>
+                    <label for="shavlo-vault-photo-input" class="px-3.5 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold cursor-pointer hover:opacity-90 transition">
+                      + Add Photo
+                      <input id="shavlo-vault-photo-input" type="file" accept="image/*" class="hidden" />
+                    </label>
+                  </div>
+                  ${vaultPhotos.length === 0 ? `
+                    <div class="py-7 text-center rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] border border-dashed border-black/15 dark:border-white/15">
+                      <p class="text-[13px] font-semibold text-ink dark:text-white">No locked photos yet</p>
+                      <p class="text-[12px] text-muted mt-1">Tap + Add Photo to keep photos inside Secret Vault</p>
+                    </div>
+                  ` : `
+                    <div class="grid grid-cols-3 gap-2">
+                      ${vaultPhotos.map(item => `
+                        <div class="relative aspect-square rounded-2xl overflow-hidden bg-surface dark:bg-zinc-900 border border-black/[0.06] dark:border-white/10">
+                          <img src="${escapeHtml(safeImgUrl(item.url))}" alt="Vault item" class="w-full h-full object-cover cursor-pointer" data-action="view-media" data-kind="photo" data-url="${escapeHtml(safeImgUrl(item.url))}" />
+                          <button type="button" data-action="remove-vault-item" data-id="${item.id}" class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-[#09090C]/80 text-white text-[11px] font-bold flex items-center justify-center">×</button>
+                        </div>
+                      `).join('')}
+                    </div>
+                  `}
+                </div>
+              </div>
+            </main>
+          </div>
+        `;
+      }
+
+      function renderYouTab() {
+        const seedWords = state.userProfile.seedWords || DEMO_SEED;
+        if (ui.secretVaultUnlocked && ui.secretVaultWindowOpen) return renderSecretVaultWindow(seedWords);
+        return `
+          <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
               <div class="md:hidden">${renderTopBrandHeader(false)}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-1 md:pt-7 pb-2.5">
                 <div class="flex items-center justify-between">
@@ -7935,11 +8010,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         </div>
                       </div>
                       ${ui.secretVaultUnlocked
-                        ? `<button data-action="lock-secret-vault" class="px-3.5 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold text-muted hover:text-ink shrink-0 transition">Lock</button>`
-                        : `<button data-action="open-secret-vault" class="px-4 py-1.5 rounded-full bg-brand-500 hover:bg-brand-600 text-white text-[12.5px] font-semibold shrink-0 transition">Unlock</button>`
+                        ? `<div class="flex items-center gap-2 shrink-0"><button type="button" data-action="open-secret-vault-window" class="px-3.5 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12.5px] font-semibold transition">Open</button><button type="button" data-action="lock-secret-vault" class="px-3.5 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] font-semibold text-muted hover:text-ink transition">Lock</button></div>`
+                        : `<button type="button" data-action="open-secret-vault" class="px-4 py-1.5 rounded-full bg-brand-500 hover:bg-brand-600 text-white text-[12.5px] font-semibold shrink-0 transition">Unlock</button>`
                       }
                     </div>
-                    ${ui.secretVaultUnlocked ? (() => {
+                    ${false && ui.secretVaultUnlocked ? (() => {
                       const hiddenIds = Object.keys((state.security && state.security.secretChatIds) || {});
                       const secretChats = getMergedChats().filter(c => hiddenIds.includes(c.id));
                       return `
@@ -8736,20 +8811,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
           `;
         } else if (ui.modal === 'contactPhotoZoom' && chat && chat.avatarUrl) {
-          inner = `
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="title-display font-bold text-[19px] truncate pr-2">${escapeHtml(chat.name)}</h3>
-              <button type="button" data-action="back-to-contact-menu" class="p-1.5 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-muted">${icon('close', 'w-4 h-4')}</button>
-            </div>
-            <div class="flex flex-col items-center">
-              <div class="w-full max-w-[300px] aspect-square rounded-3xl overflow-hidden bg-zinc-950 border border-black/10 dark:border-white/15 shadow-xl">
-                <img src="${safeImgUrl(chat.avatarUrl)}" alt="${escapeHtml(chat.name)}" class="w-full h-full object-cover />
-              </div>
-              <button type="button" data-action="back-to-contact-menu" class="mt-4 w-full h-10 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold hover:opacity-85 transition">
-                Back to Contact
-              </button>
-            </div>
-          `;
+          inner = '';
         } else if (ui.modal === 'contactMenu' && chat) {
           ensureSecurityDefaults();
           inner = `
@@ -8814,6 +8876,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <span class="text-[12px]">${isChatBlocked(chat.id) ? 'Blocked' : ''}</span>
                 </button>
               `}
+              <button type="button" data-action="ctx-delete-chat" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold text-rose-600 dark:text-rose-400 transition">
+                <span class="flex items-center gap-2.5">${icon('trash', 'w-4 h-4')}<span>Delete chat</span></span>
+              </button>
             </div>
           `;
         } else if (ui.modal === 'chatMedia' && chat) {
@@ -9503,6 +9568,69 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </div>
             </div>
           `;
+        } else if (ui.modal === 'statusStudio') {
+          const ss = ui.statusStudio || { step: 'pick', src: '', zoom: 1, x: 0, y: 0, rotate: 0, imgW: 400, imgH: 400, words: '', caption: '' };
+          if (ss.step === 'edit' && ss.src) {
+            const aspect = (ss.imgW || 1) / (ss.imgH || 1);
+            const stageW = 240, stageH = 300;
+            const baseW = aspect >= (stageW / stageH) ? stageH * aspect : stageW;
+            const baseH = aspect >= (stageW / stageH) ? stageH : stageW / aspect;
+            inner = `
+              <div class="w-full min-w-0 space-y-3.5">
+                <div class="flex items-center justify-between gap-2">
+                  <button type="button" data-action="status-studio-back" class="w-9 h-9 rounded-full bg-surface dark:bg-zinc-800 text-ink dark:text-white flex items-center justify-center shrink-0">${icon('back', 'w-4 h-4')}</button>
+                  <div class="text-center min-w-0">
+                    <h3 class="title-display font-bold text-[17px] leading-tight">Edit Status</h3>
+                    <p class="text-[11.5px] text-muted">Drag, zoom &amp; add words</p>
+                  </div>
+                  <button type="button" data-action="close-modal" class="w-9 h-9 rounded-full bg-surface dark:bg-zinc-800 text-muted flex items-center justify-center shrink-0">${icon('close', 'w-4 h-4')}</button>
+                </div>
+                <div class="flex justify-center">
+                  <div id="status-crop-stage" style="touch-action:none;" class="relative w-[240px] h-[300px] rounded-3xl overflow-hidden bg-zinc-950 ring-2 ring-[#C6A76D]/50 cursor-grab active:cursor-grabbing select-none shadow-lg shrink-0">
+                    <img id="status-crop-preview-img" src="${safeImgUrl(ss.src)}" alt="Status preview" draggable="false" style="width:${baseW}px; height:${baseH}px; max-width:none; left:50%; top:50%; transform:translate(calc(-50% + ${ss.x}px), calc(-50% + ${ss.y}px)) scale(${ss.zoom}) rotate(${ss.rotate}deg); transform-origin:center center;" class="absolute pointer-events-none select-none" />
+                    <div id="status-words-overlay" class="pointer-events-none absolute inset-x-3 bottom-4 text-center">
+                      ${ss.words ? `<span class="inline-block px-3 py-1.5 rounded-2xl bg-black/55 backdrop-blur-md text-white title-display text-[15px] font-bold leading-snug shadow">${escapeHtml(ss.words)}</span>` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 w-full min-w-0">
+                  <button type="button" data-action="status-zoom-step" data-delta="-0.2" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-900 font-bold text-[15px] flex items-center justify-center shrink-0">−</button>
+                  <input id="status-zoom-slider" type="range" min="1" max="3.5" step="0.02" value="${ss.zoom}" class="flex-1 min-w-0 w-full accent-[#09090C] dark:accent-white cursor-pointer" />
+                  <button type="button" data-action="status-zoom-step" data-delta="0.2" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-900 font-bold text-[15px] flex items-center justify-center shrink-0">+</button>
+                  <button type="button" data-action="status-rotate" class="px-3 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[12px] font-semibold shrink-0">90°</button>
+                </div>
+                <input id="status-words-input" type="text" maxlength="100" value="${escapeHtml(ss.words || '')}" placeholder="Add words on photo..." class="w-full h-10 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/50" />
+                <input id="status-caption-input" type="text" maxlength="180" value="${escapeHtml(ss.caption || '')}" placeholder="Add a caption..." class="w-full h-10 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/50" />
+                <button type="button" data-action="send-status-studio" class="w-full py-3 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold shadow-sm hover:opacity-90 transition">
+                  Send Status
+                </button>
+              </div>
+            `;
+          } else {
+            inner = `
+              <div class="w-full min-w-0 space-y-4">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 class="title-display font-bold text-[19px] leading-tight">New Photo Status</h3>
+                    <p class="text-[12px] text-muted mt-0.5">Take a photo or choose from your gallery</p>
+                  </div>
+                  <button type="button" data-action="close-modal" class="w-9 h-9 rounded-full bg-surface dark:bg-zinc-800 text-muted flex items-center justify-center shrink-0">${icon('close', 'w-4 h-4')}</button>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <label for="status-studio-camera-input" class="p-4 rounded-3xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90 transition">
+                    ${icon('camera', 'w-6 h-6')}
+                    <span class="text-[13.5px] font-bold">Camera</span>
+                    <input id="status-studio-camera-input" type="file" accept="image/*" capture="environment" class="sr-only" />
+                  </label>
+                  <label for="status-studio-gallery-input-modal" class="p-4 rounded-3xl bg-surface dark:bg-zinc-900 border border-[#C6A76D]/35 text-ink dark:text-white flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition">
+                    ${icon('photo', 'w-6 h-6 text-[#C6A76D]')}
+                    <span class="text-[13.5px] font-bold">Full Gallery</span>
+                    <input id="status-studio-gallery-input-modal" type="file" accept="image/*" class="sr-only" />
+                  </label>
+                </div>
+              </div>
+            `;
+          }
         } else if (ui.modal === 'cropAvatar' && ui.cropAvatar) {
           const ca = ui.cropAvatar;
           const aspect = (ca.imgW || 1) / (ca.imgH || 1);
@@ -9541,6 +9669,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           `;
         }
 
+        if (ui.modal === 'contactPhotoZoom' && chat && chat.avatarUrl) {
+          root.innerHTML = `
+            <div data-action="back-to-contact-menu" class="fixed inset-0 z-50 bg-black/55 backdrop-blur-md flex items-center justify-center p-6 cursor-pointer">
+              <img src="${safeImgUrl(chat.avatarUrl)}" alt="${escapeHtml(chat.name)}" class="w-64 h-64 sm:w-72 sm:h-72 rounded-full object-cover ring-2 ring-[#C6A76D]/60 shadow-2xl" />
+            </div>
+          `;
+          return;
+        }
         const isBottomSheet = (ui.modal === 'photoPicker' || ui.modal === 'upi');
         root.innerHTML = `
           <div data-action="close-modal-backdrop" class="fixed inset-0 z-50 bg-black/25 backdrop-blur-sm flex ${isBottomSheet ? 'items-end justify-center p-0 sm:items-center sm:p-4' : 'items-center justify-center p-4'} overflow-hidden">
@@ -10219,7 +10355,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (action === 'download-seed') { downloadSeedFile(authState.generatedSeed, authState.displayName, ''); return; }
         if (action === 'signup-back') { authState.signupStep = Math.max(1, authState.signupStep - 1); authState.authError = ''; render(); return; }
         if (action === 'signup-to-verify') { authState.signupStep = 3; authState.verifyInputs = ['', '', '']; authState.authError = ''; render(); return; }
-        if (action === 'autofill-verify') { authState.verifyInputs = authState.verifyIndices.map(i => authState.generatedSeed[i]); authState.authError = ''; render(); return; }
         if (action === 'clear-media-cache') {
           _avatarHtmlCache.clear();
           _qrMatrixCache.clear();
@@ -10248,12 +10383,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           return;
         }
         if (action === 'nav') {
-          if (btn.dataset.nav === 'you' && suppressNextYouNav) { suppressNextYouNav = false; return; }
           if (suppressNextDockClick) { suppressNextDockClick = false; return; }
           const _ord = ['updates', 'calls', 'groups', 'messages', 'you'];
           const _prevI = _ord.indexOf(state.activeNav || 'messages');
           const _nextI = _ord.indexOf(btn.dataset.nav || 'messages');
           if (_prevI >= 0 && _nextI >= 0 && _prevI !== _nextI) ui._navTransition = _nextI > _prevI ? 'left' : 'right';
+          if (btn.dataset.nav === 'you') ui._justOpenedYouAt = Date.now();
           state.activeNav = btn.dataset.nav;
           ui.attachMenuOpen = false;
           saveUiNavState();
@@ -10496,7 +10631,32 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             if (!ui.attachMenuOpen) ui.attachFullMenu = false;
             render();
           }, 230);
+        } else if (action === 'open-status-studio') {
+          ui.statusStudio = { step: 'pick', src: '', zoom: 1, x: 0, y: 0, rotate: 0, imgW: 400, imgH: 400, words: '', caption: '' };
+          ui.modal = 'statusStudio';
+          renderModal();
+        } else if (action === 'status-studio-back') {
+          if (ui.statusStudio) { ui.statusStudio.step = 'pick'; renderModal(); }
+        } else if (action === 'status-studio-pick-sample') {
+          const u = btn.dataset.url || '';
+          if (u) openStatusStudioEditor(u);
+        } else if (action === 'status-zoom-step') {
+          if (ui.statusStudio) {
+            const d = parseFloat(btn.dataset.delta || '0');
+            ui.statusStudio.zoom = Math.min(3.5, Math.max(1, +(ui.statusStudio.zoom + d).toFixed(2)));
+            const sl = document.getElementById('status-zoom-slider');
+            if (sl) sl.value = String(ui.statusStudio.zoom);
+            updateStatusStudioPreviewDom();
+          }
+        } else if (action === 'status-rotate') {
+          if (ui.statusStudio) {
+            ui.statusStudio.rotate = (ui.statusStudio.rotate + 90) % 360;
+            updateStatusStudioPreviewDom();
+          }
+        } else if (action === 'send-status-studio') {
+          sendStatusStudio();
         } else if (action === 'open-modal') {
+          if (btn.dataset.modal === 'avatarMenu' && ui._justOpenedYouAt && (Date.now() - ui._justOpenedYouAt < 400)) return;
           if (btn.dataset.modal === 'catalog') catalogCart = {};
           ui.attachMenuOpen = false;
           ui.modal = btn.dataset.modal;
@@ -11052,8 +11212,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.secretPinError = '';
           ui.modal = 'secretPin';
           renderModal();
+        } else if (action === 'open-secret-vault-window') {
+          if (ui.secretVaultUnlocked) { ui.secretVaultWindowOpen = true; render(); }
+          else { ui.secretPinError = ''; ui.modal = 'secretPin'; renderModal(); }
+        } else if (action === 'close-secret-vault-window') {
+          ui.secretVaultWindowOpen = false;
+          render();
         } else if (action === 'lock-secret-vault') {
           ui.secretVaultUnlocked = false;
+          ui.secretVaultWindowOpen = false;
           render();
           showToast('Secret Vault locked');
         } else if (action === 'toggle-secret-chat') {
@@ -11388,7 +11555,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'ctx-pin') {
           const c = getMergedChats().find(x => x.id === btn.dataset.id);
           if (btn && btn.dataset && btn.dataset.id) togglePinChat(btn.dataset.id);
-          ui.modal = null; ui.contextMenuChatId = null; render();
+          state.mobileView = 'list'; ui.modal = null; ui.contextMenuChatId = null; render();
         } else if (action === 'ctx-mute') {
           const c = getMergedChats().find(x => x.id === btn.dataset.id);
           if (c) { c.muted = !c.muted; persistCurrentVault(); showToast(c.muted ? 'Notifications muted' : 'Notifications unmuted'); }
@@ -11806,6 +11973,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               showToast('Chat unlocked');
             } else {
               ui.secretVaultUnlocked = true;
+              ui.secretVaultWindowOpen = true;
               render();
               showToast('Secret Vault unlocked');
             }
@@ -12071,6 +12239,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               renderModal();
             });
           }
+        } else if (e.target && (e.target.id === 'status-studio-camera-input' || e.target.id === 'status-studio-gallery-input' || e.target.id === 'status-studio-gallery-input-modal') && e.target.files && e.target.files[0]) {
+          processChatMediaFile(e.target.files[0], (dataUrl) => {
+            openStatusStudioEditor(dataUrl);
+          }, 2048, 0.94);
+          e.target.value = '';
         } else if (e.target && e.target.id === 'status-photo-input' && e.target.files && e.target.files[0]) {
           processChatMediaFile(e.target.files[0], (dataUrl) => {
             ui.statusDraftPhoto = dataUrl;
@@ -12786,26 +12959,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
       });
 
-      // Secret Hold (500ms) on bottom-right 'You' tab -> opens shavlo Vault
-      let youVaultTimer = null;
-      let suppressNextYouNav = false;
-      document.addEventListener('pointerdown', (e) => {
-        const youBtn = e.target && e.target.closest && e.target.closest('[data-action="nav"][data-nav="you"]');
-        if (youBtn && state && !ui.modal && !ui.vaultLocked) {
-          clearTimeout(youVaultTimer);
-          youVaultTimer = setTimeout(() => {
-            suppressNextYouNav = true;
-            setTimeout(() => { suppressNextYouNav = false; }, 350);
-            triggerHaptic([14, 30, 14]);
-            ui.shavloVaultPinError = '';
-            ui.modal = 'shavloVault';
-            renderModal();
-          }, 500);
-        }
-      });
-      document.addEventListener('pointermove', () => clearTimeout(youVaultTimer), { passive: true });
-      document.addEventListener('pointerup', () => clearTimeout(youVaultTimer));
-      document.addEventListener('pointercancel', () => clearTimeout(youVaultTimer));
+
 
       // 3-Minute Away-Tab & Idle Auto-Lock (180,000ms)
       let vaultAwayAt = 0;
@@ -12947,6 +13101,74 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }, { passive: true });
 
 
+      function openStatusStudioEditor(dataUrl) {
+        const img = new Image();
+        img.onload = () => {
+          ui.statusStudio = {
+            step: 'edit',
+            src: dataUrl,
+            zoom: 1, x: 0, y: 0, rotate: 0,
+            imgW: img.naturalWidth || img.width || 400,
+            imgH: img.naturalHeight || img.height || 500,
+            words: '', caption: ''
+          };
+          ui.modal = 'statusStudio';
+          renderModal();
+        };
+        img.onerror = () => showToast('Could not load image');
+        img.src = dataUrl;
+      }
+      function updateStatusStudioPreviewDom() {
+        const imgEl = document.getElementById('status-crop-preview-img');
+        if (!imgEl || !ui.statusStudio) return;
+        const ss = ui.statusStudio;
+        imgEl.style.transform = `translate(calc(-50% + ${ss.x}px), calc(-50% + ${ss.y}px)) scale(${ss.zoom}) rotate(${ss.rotate}deg)`;
+      }
+      function sendStatusStudio() {
+        if (!ui.statusStudio || !ui.statusStudio.src || !state) return;
+        const ss = ui.statusStudio;
+        const img = new Image();
+        img.onload = () => {
+          const outW = 1080, outH = 1350, stageW = 240, stageH = 300;
+          const ratio = outW / stageW;
+          const canvas = document.createElement('canvas');
+          canvas.width = outW; canvas.height = outH;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#09090C';
+          ctx.fillRect(0, 0, outW, outH);
+          const aspect = (img.naturalWidth || 1) / (img.naturalHeight || 1);
+          const drawW = (aspect >= (stageW / stageH) ? stageH * aspect : stageW) * ratio;
+          const drawH = (aspect >= (stageW / stageH) ? stageH : stageW / aspect) * ratio;
+          ctx.save();
+          ctx.translate(outW / 2 + ss.x * ratio, outH / 2 + ss.y * ratio);
+          ctx.scale(ss.zoom, ss.zoom);
+          ctx.rotate((ss.rotate * Math.PI) / 180);
+          ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+          ctx.restore();
+          const words = String(ss.words || '').trim();
+          if (words) {
+            ctx.save();
+            ctx.font = '700 48px Sora, Inter, sans-serif';
+            ctx.textAlign = 'center';
+            const tw = Math.min(outW - 120, ctx.measureText(words).width + 64);
+            ctx.fillStyle = 'rgba(0,0,0,0.58)';
+            ctx.beginPath();
+            ctx.roundRect((outW - tw) / 2, outH - 180, tw, 78, 24);
+            ctx.fill();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(words, outW / 2, outH - 125, outW - 150);
+            ctx.restore();
+          }
+          const finalUrl = canvas.toDataURL('image/jpeg', 0.9);
+          const cap = String(ss.caption || '').trim();
+          ui.statusStudio = null;
+          ui.modal = null;
+          renderModal();
+          postNew24hStatus(cap, 'from-[#111113] to-[#27272A]', finalUrl);
+        };
+        img.src = ss.src;
+      }
+
       function openAvatarCropper(dataUrl) {
         const img = new Image();
         img.onload = () => {
@@ -13031,28 +13253,57 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }
 
       let cropDrag = null;
+      let statusDrag = null;
       document.addEventListener('pointerdown', (e) => {
+        const stStage = e.target && e.target.closest ? e.target.closest('#status-crop-stage') : null;
+        if (stStage && ui.statusStudio) {
+          statusDrag = { startX: e.clientX, startY: e.clientY, origX: ui.statusStudio.x, origY: ui.statusStudio.y };
+          try { stStage.setPointerCapture(e.pointerId); } catch (_) {}
+          return;
+        }
         const stage = e.target && e.target.closest ? e.target.closest('#crop-stage') : null;
         if (!stage || !ui.cropAvatar) return;
         cropDrag = { startX: e.clientX, startY: e.clientY, origX: ui.cropAvatar.x, origY: ui.cropAvatar.y, pointerId: e.pointerId };
         try { stage.setPointerCapture(e.pointerId); } catch (err) {}
       });
       document.addEventListener('pointermove', (e) => {
+        if (statusDrag && ui.statusStudio) {
+          const maxPan = 220 * ui.statusStudio.zoom;
+          ui.statusStudio.x = Math.max(-maxPan, Math.min(maxPan, statusDrag.origX + (e.clientX - statusDrag.startX)));
+          ui.statusStudio.y = Math.max(-maxPan, Math.min(maxPan, statusDrag.origY + (e.clientY - statusDrag.startY)));
+          updateStatusStudioPreviewDom();
+          return;
+        }
         if (!cropDrag || !ui.cropAvatar) return;
         const maxPan = 180 * ui.cropAvatar.zoom;
         ui.cropAvatar.x = Math.max(-maxPan, Math.min(maxPan, cropDrag.origX + (e.clientX - cropDrag.startX)));
         ui.cropAvatar.y = Math.max(-maxPan, Math.min(maxPan, cropDrag.origY + (e.clientY - cropDrag.startY)));
         updateCropPreviewDom();
       });
-      document.addEventListener('pointerup', () => { cropDrag = null; });
-      document.addEventListener('pointercancel', () => { cropDrag = null; });
+      document.addEventListener('pointerup', () => { cropDrag = null; statusDrag = null; });
+      document.addEventListener('pointercancel', () => { cropDrag = null; statusDrag = null; });
       document.addEventListener('input', (e) => {
-        if (e.target && e.target.id === 'crop-zoom-slider' && ui.cropAvatar) {
+        if (e.target && e.target.id === 'status-zoom-slider' && ui.statusStudio) {
+          ui.statusStudio.zoom = parseFloat(e.target.value) || 1;
+          updateStatusStudioPreviewDom();
+        } else if (e.target && e.target.id === 'status-words-input' && ui.statusStudio) {
+          ui.statusStudio.words = e.target.value;
+          const ov = document.getElementById('status-words-overlay');
+          if (ov) ov.innerHTML = ui.statusStudio.words ? `<span class="inline-block px-3 py-1.5 rounded-2xl bg-black/55 backdrop-blur-md text-white title-display text-[15px] font-bold leading-snug shadow">${escapeHtml(ui.statusStudio.words)}</span>` : '';
+        } else if (e.target && e.target.id === 'status-caption-input' && ui.statusStudio) {
+          ui.statusStudio.caption = e.target.value;
+        } else if (e.target && e.target.id === 'crop-zoom-slider' && ui.cropAvatar) {
           ui.cropAvatar.zoom = parseFloat(e.target.value) || 1;
           updateCropPreviewDom();
         }
       });
       document.addEventListener('wheel', (e) => {
+        const stStage = e.target && e.target.closest ? e.target.closest('#status-crop-stage') : null;
+        if (stStage && ui.statusStudio) {
+          statusDrag = { startX: e.clientX, startY: e.clientY, origX: ui.statusStudio.x, origY: ui.statusStudio.y };
+          try { stStage.setPointerCapture(e.pointerId); } catch (_) {}
+          return;
+        }
         const stage = e.target && e.target.closest ? e.target.closest('#crop-stage') : null;
         if (!stage || !ui.cropAvatar) return;
         e.preventDefault();
@@ -13176,6 +13427,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             const _pi = _ord.indexOf(state.activeNav || 'messages');
             const _ni = _ord.indexOf(chosenNav || 'messages');
             if (_pi >= 0 && _ni >= 0) ui._navTransition = _ni > _pi ? 'left' : 'right';
+            if (chosenNav === 'you') ui._justOpenedYouAt = Date.now();
             state.activeNav = chosenNav;
             ui.attachMenuOpen = false;
             saveUiNavState();
