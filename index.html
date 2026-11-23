@@ -479,6 +479,8 @@
     .msg-hover-bar { transform: translate3d(0,4px,0); opacity: 0; pointer-events: none; transition: transform 0.12s ease-out, opacity 0.12s ease-out; will-change: transform, opacity; }
     .group:hover .msg-hover-bar, .group:focus-within .msg-hover-bar { transform: translate3d(0,0,0); opacity: 1; pointer-events: auto; }
     @keyframes statusFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    #mobile-dock-wrap, #mobile-dock-wrap *, #mobile-dock-nav, #mobile-dock-nav * { transition: none !important; animation: none !important; }
+    #mobile-dock-nav button:active { transform: none !important; }
     #dock-glass-lens {
       position: absolute;
       top: 0;
@@ -497,7 +499,7 @@
         inset 0 -1px 2px rgba(9, 9, 12, 0.06),
         0 10px 28px -6px rgba(9, 9, 12, 0.22);
       will-change: transform, opacity, width, height;
-      transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+      transition: none;
     }
     .dark #dock-glass-lens {
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.1) 100%);
@@ -1246,6 +1248,73 @@
       const OUTBOX_KEY = 'shavlo_outbox_v1';
       let supaClient = null;
       let supaRealtimeChan = null;
+      const _roomChannels = new Map();
+      function subscribeRoomChannel(roomId) {
+        if (!supaClient || !roomId || !activeVaultId) return null;
+        if (_roomChannels.has(roomId)) return _roomChannels.get(roomId);
+        try {
+          const ch = supaClient
+            .channel('shavlo-room:' + roomId, { config: { broadcast: { self: false } } })
+            .on('broadcast', { event: 'typing' }, ({ payload }) => {
+              if (payload && payload.fromId !== activeVaultId && payload.roomId) markRemoteTyping(payload.roomId);
+            })
+            .on('broadcast', { event: 'ring_ping' }, ({ payload }) => {
+              if (payload && payload.fromId !== activeVaultId) triggerRingPing(payload.roomId, payload.fromName, true);
+            })
+            .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
+              handleWebRtcSignal(payload);
+            })
+            .on('broadcast', { event: 'call_ring_fast' }, ({ payload }) => {
+              try {
+                const c = payload;
+                if (!c || !c.room_id || c.callee_id !== activeVaultId) return;
+                const net = getNetwork();
+                net.activeCalls = net.activeCalls || {};
+                net.activeCalls[c.room_id] = {
+                  roomId: c.room_id, callerId: c.caller_id, callerName: c.caller_name,
+                  calleeId: c.callee_id, calleeName: c.callee_name, type: c.call_type,
+                  status: c.status || 'ringing', startedAt: c.started_at || Date.now()
+                };
+                saveNetwork(net, 'realtime_fast_call_ring');
+                syncFromNetwork();
+              } catch (_) {}
+            })
+            .on('broadcast', { event: 'call_ended_fast' }, ({ payload }) => {
+              try {
+                if (!payload || !payload.roomId || payload.fromId === activeVaultId) return;
+                const net = getNetwork();
+                if (net.activeCalls && net.activeCalls[payload.roomId]) {
+                  delete net.activeCalls[payload.roomId];
+                  saveNetwork(net, 'realtime_fast_call_end');
+                }
+                if (ui.activeCall && ui.activeCall.roomId === payload.roomId) {
+                  closeWebRtc(); stopIncomingRingtone(); stopLocalCamera();
+                  clearInterval(callTimer); clearInterval(_callStatsTimer); clearInterval(_callHeartbeatTimer);
+                  releaseCallWakeLock(); ui.activeCall = null; renderCallOverlay(); showToast('Call ended');
+                }
+              } catch (_) {}
+            })
+            .on('broadcast', { event: 'call_accepted' }, ({ payload }) => {
+              if (!payload || !ui.activeCall || payload.fromId === activeVaultId) return;
+              if (payload.roomId === ui.activeCall.roomId && ui.activeCall.status === 'ringing') {
+                stopIncomingRingtone();
+                ui.activeCall.status = 'connected';
+                ui.activeCall.seconds = 0;
+                renderCallOverlay();
+                startCallTimer();
+                startWebRtcOffer(ui.activeCall.roomId, payload.fromId, ui.activeCall.type);
+              }
+            })
+            .subscribe();
+          _roomChannels.set(roomId, ch);
+          return ch;
+        } catch (_) { return null; }
+      }
+      function sendRoomBroadcast(roomId, eventName, payload) {
+        const ch = roomId ? subscribeRoomChannel(roomId) : null;
+        if (ch) { try { ch.send({ type: 'broadcast', event: eventName, payload }); } catch (_) {} }
+        if (supaRealtimeChan) { try { supaRealtimeChan.send({ type: 'broadcast', event: eventName, payload }); } catch (_) {} }
+      }
       let supaPollTimer = null;
       let supaStatus = 'local'; // 'local' | 'connected' | 'realtime' | 'error'
       let supaLastError = '';
@@ -1460,11 +1529,11 @@
             showSystemNotif(senderName, 'Pinged you', 'shavlo-ping-' + chatId, chatId);
           }
         }
-        safeBackgroundRender();
+        patchChatRowRingInPlace(chatId, true);
         setTimeout(() => {
           if (ui.ringPingChats && ui.ringPingChats[chatId] && ui.ringPingChats[chatId] <= Date.now()) {
             delete ui.ringPingChats[chatId];
-            safeBackgroundRender();
+            patchChatRowRingInPlace(chatId, false);
           }
         }, 1500);
       }
@@ -1487,9 +1556,7 @@
           if (liveChannel) {
             try { liveChannel.postMessage({ type: 'ring_ping', ...payload }); } catch (err) {}
           }
-          if (supaRealtimeChan) {
-            try { supaRealtimeChan.send({ type: 'broadcast', event: 'ring_ping', payload }); } catch (err) {}
-          }
+          sendRoomBroadcast(target.id, 'ring_ping', payload);
         } else {
           // Demo App example: contact pings you back 1.15s later with a live #C6A76D shockwave + haptic
           const demoId = target.id;
@@ -1603,6 +1670,8 @@
       }
       setInterval(() => { if (activeVaultId && state && !document.hidden) syncOwnPresence(); }, 8000);
       window.addEventListener('beforeunload', () => { syncOwnPresence(true); });
+      window.addEventListener('pagehide', () => { syncOwnPresence(true); });
+      window.addEventListener('offline', () => { syncOwnPresence(true); });
       document.addEventListener('touchend', (e) => {
         if (!_edgeBackStartX) return;
         const t = e.changedTouches && e.changedTouches[0];
@@ -1641,7 +1710,7 @@
           }
         });
       }
-      document.addEventListener('visibilitychange', () => { if (activeVaultId && state) { syncOwnPresence(document.hidden); if (!document.hidden && getSupaCfg()) syncWithSupabase(); } });
+      document.addEventListener('visibilitychange', () => { if (activeVaultId && state) { syncOwnPresence(document.hidden); if (!document.hidden && getSupaCfg()) flushOutbox().then(() => syncWithSupabase()); } });
 
       const lastRingStateByChat = {};
       function triggerRingHaptic(chatId, nextState) {
@@ -1819,23 +1888,58 @@
         return false;
       }
 
+      function patchChatRowRingInPlace(chatId, active) {
+        const avWrap = document.querySelector(`[data-chat-av-wrap="${chatId}"]`);
+        if (avWrap) {
+          avWrap.querySelectorAll('.ring-ping-wave').forEach(el => el.remove());
+          if (active) {
+            avWrap.insertAdjacentHTML('afterbegin', '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>');
+          }
+        }
+        const hdrAv = document.getElementById('active-chat-avatar');
+        if (hdrAv && state && state.selectedChatId === chatId) {
+          hdrAv.classList.toggle('ring-2', active);
+          hdrAv.classList.toggle('ring-[#C6A76D]', active);
+        }
+      }
+
+      function patchChatsScrollInPlace() {
+        const listEl = document.getElementById('chats-scroll');
+        if (!listEl) return false;
+        const curItems = Array.from(listEl.querySelectorAll('[data-chat-item]'));
+        const curIds = curItems.map(el => el.getAttribute('data-chat-item'));
+        const tmp = document.createElement('div');
+        tmp.innerHTML = renderMessagesTab();
+        const nextList = tmp.querySelector('#chats-scroll');
+        if (!nextList) return false;
+        const nextItems = Array.from(nextList.querySelectorAll('[data-chat-item]'));
+        const nextIds = nextItems.map(el => el.getAttribute('data-chat-item'));
+        if (curIds.length === nextIds.length && curIds.every((id, i) => id === nextIds[i])) {
+          nextIds.forEach((cid) => {
+            ['data-chat-time', 'data-chat-preview', 'data-chat-unread'].forEach(attr => {
+              const curNode = listEl.querySelector(`[${attr}="${cid}"]`);
+              const nextNode = nextList.querySelector(`[${attr}="${cid}"]`);
+              if (curNode && nextNode && curNode.innerHTML !== nextNode.innerHTML) {
+                curNode.innerHTML = nextNode.innerHTML;
+              }
+            });
+            const isRing = !!(ui.ringPingChats && ui.ringPingChats[cid] > Date.now());
+            patchChatRowRingInPlace(cid, isRing);
+          });
+          return true;
+        }
+        const prevTop = listEl.scrollTop;
+        listEl.innerHTML = nextList.innerHTML;
+        listEl.scrollTop = prevTop;
+        return true;
+      }
+
       function safeBackgroundRender() {
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
         if (patchActiveTabContainerInPlace()) return;
         if (state && state.activeNav === 'messages') {
-          const listEl = document.getElementById('chats-scroll');
-          if (listEl) {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = renderMessagesTab();
-            const nextList = tmp.querySelector('#chats-scroll');
-            if (nextList && listEl.innerHTML !== nextList.innerHTML) {
-              const top = listEl.scrollTop;
-              listEl.innerHTML = nextList.innerHTML;
-              listEl.scrollTop = top;
-            }
-            return;
-          }
+          if (patchChatsScrollInPlace()) return;
         }
         render();
       }
@@ -1852,6 +1956,11 @@
       }
 
       function closeWebRtc() {
+        _rtcPeerPromise = null;
+        _preCreatedOffer = null;
+        _offerSentRoom = '';
+        _pendingIce = [];
+        _queuedIceToSend = [];
         if (rtcPc) {
           try { rtcPc.close(); } catch (e) {}
           rtcPc = null;
@@ -1865,11 +1974,7 @@
       function sendWebRtcSignal(roomId, toId, data) {
         if (!supaRealtimeChan || !roomId || !activeVaultId) return;
         try {
-          supaRealtimeChan.send({
-            type: 'broadcast',
-            event: 'webrtc_signal',
-            payload: { roomId, fromId: activeVaultId, toId: toId || '', data }
-          });
+          sendRoomBroadcast(roomId, 'webrtc_signal', { roomId, fromId: activeVaultId, toId: toId || '', data });
         } catch (e) {}
       }
 
@@ -2019,6 +2124,20 @@
           supaWriteReliable('shavlo_push_subs', 'POST', '', { vault_id: activeVaultId, subscription: sub.toJSON(), updated_at: Date.now() });
           return true;
         } catch (e) { return false; }
+      }
+
+      async function refreshDynamicTurnServers() {
+        const cfg = getSupaCfg();
+        if (!cfg || !cfg.url) return;
+        try {
+          const res = await fetch(`${cfg.url}/functions/v1/shavlo-sync?mode=turn`);
+          if (!res.ok) return;
+          const j = await res.json();
+          if (j && j.ok && Array.isArray(j.iceServers)) {
+            const turn = j.iceServers.find(s => s && s.urls && String(s.urls).startsWith('turn'));
+            if (turn) setTurnConfig(turn.urls, turn.username || '', turn.credential || '');
+          }
+        } catch (_) {}
       }
 
       function getIceServers() {
@@ -2184,7 +2303,12 @@
           };
           pc.onicecandidate = (ev) => {
             if (ev.candidate) {
-              sendWebRtcSignal(roomId, peerId, { kind: 'ice', candidate: ev.candidate.toJSON() });
+              const candJson = ev.candidate.toJSON();
+              if (ui.activeCall && ui.activeCall.status === 'connected') {
+                sendWebRtcSignal(roomId, peerId, { kind: 'ice', candidate: candJson });
+              } else {
+                _queuedIceToSend.push({ roomId, peerId, candidate: candJson });
+              }
             }
           };
           pc.oniceconnectionstatechange = () => {
@@ -2287,6 +2411,8 @@
       }
 
       let _preCreatedOffer = null;
+      let _offerSentRoom = '';
+      let _queuedIceToSend = [];
       function enableOpusDtx(sdpObj) {
         if (!sdpObj || !sdpObj.sdp) return sdpObj;
         const sdp = sdpObj.sdp.replace(/a=fmtp:111 (.+)/g, (m, params) => params.includes('usedtx=1') ? m : `a=fmtp:111 ${params};usedtx=1`);
@@ -2330,20 +2456,40 @@
         } catch (_) {}
       }
 
+      function flushQueuedIceToSend(roomId) {
+        if (!_queuedIceToSend.length) return;
+        const keep = [];
+        while (_queuedIceToSend.length) {
+          const item = _queuedIceToSend.shift();
+          if (item.roomId === roomId) sendWebRtcSignal(item.roomId, item.peerId, { kind: 'ice', candidate: item.candidate });
+          else keep.push(item);
+        }
+        _queuedIceToSend = keep;
+      }
+
       async function startWebRtcOffer(roomId, peerId, callType) {
+        if (!roomId || _offerSentRoom === roomId) return;
+        _offerSentRoom = roomId;
         try {
           const pc = await ensureWebRtcPeer(roomId, peerId, callType);
-          if (!pc) return;
+          if (!pc) { _offerSentRoom = ''; return; }
           if (_preCreatedOffer && _preCreatedOffer.roomId === roomId && _preCreatedOffer.sdp) {
             const sdp = _preCreatedOffer.sdp;
             _preCreatedOffer = null;
             sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp });
+            flushQueuedIceToSend(roomId);
+            return;
+          }
+          if (pc.localDescription && pc.localDescription.type === 'offer') {
+            sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: pc.localDescription });
+            flushQueuedIceToSend(roomId);
             return;
           }
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: offer });
-        } catch (e) {}
+          flushQueuedIceToSend(roomId);
+        } catch (e) { _offerSentRoom = ''; }
       }
 
       let _pendingIce = [];
@@ -2637,7 +2783,8 @@
           avatar_text: getInitial(state.userProfile.name),
           avatar_url: safeImgUrl(state.userProfile.avatarUrl) || '',
           pub_key: (await ensureMyEcdhKeys())?.pubJwk || null,
-          updated_at: Date.now()
+          updated_at: Date.now(),
+          last_seen_at: Date.now()
         });
         try {
           let devId = localStorage.getItem('shavlo_device_id_v1');
@@ -2829,6 +2976,7 @@
           const nowMs = Date.now();
           for (const row of (msgs || [])) {
             if (row.expires_at && Number(row.expires_at) < nowMs) continue;
+            if (row.deleted_at) continue;
             const decPl = await decryptMsgPayload(row.room_id, row.payload);
             groupedMsgs[row.room_id] = groupedMsgs[row.room_id] || [];
             groupedMsgs[row.room_id].push(Object.assign({}, decPl, {
@@ -2976,7 +3124,7 @@
         // Start instant Supabase Realtime WebSocket subscription if SDK loaded
         try {
           if (window.supabase && typeof window.supabase.createClient === 'function') {
-            supaClient = window.supabase.createClient(cfg.url, cfg.key);
+            supaClient = window.supabase.createClient(cfg.url, cfg.key, { realtime: { params: { eventsPerSecond: 20 } } });
             ensureSupaAuthSession();
             supaRealtimeChan = supaClient
               .channel('shavlo-live-all', { config: { presence: { key: activeVaultId || 'anon' } } })
@@ -3032,7 +3180,81 @@
               })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_requests' }, () => scheduleSupaSync(250))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_friendships' }, () => scheduleSupaSync(250))
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_groups' }, () => scheduleSupaSync(250))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_groups' }, (change) => {
+                try {
+                  const net = getNetwork();
+                  net.groups = net.groups || [];
+                  if (change && change.eventType === 'DELETE' && change.old && change.old.id) {
+                    net.groups = net.groups.filter(g => g.id !== change.old.id);
+                    saveNetwork(net, 'realtime_group_del');
+                    syncFromNetwork();
+                    return;
+                  }
+                  if (change && change.new && change.new.id) {
+                    const g = change.new;
+                    if (g.expires_at && Number(g.expires_at) <= Date.now()) {
+                      net.groups = net.groups.filter(x => x.id !== g.id);
+                    } else {
+                      const mapped = {
+                        id: g.id, code: g.code, name: g.name, desc: g.description || '',
+                        creatorId: g.creator_id, memberIds: Array.isArray(g.member_ids) ? g.member_ids : [],
+                        createdAt: g.created_at || Date.now(),
+                        expiresAt: g.expires_at ? Number(g.expires_at) : null
+                      };
+                      const idx = net.groups.findIndex(x => x.id === g.id);
+                      if (idx >= 0) net.groups[idx] = mapped;
+                      else net.groups.unshift(mapped);
+                    }
+                    saveNetwork(net, 'realtime_group');
+                    syncFromNetwork();
+                    return;
+                  }
+                } catch (_) {}
+                scheduleSupaSync(250);
+              })
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_user_prefs' }, (change) => {
+                try {
+                  if (change && change.new && change.new.vault_id === activeVaultId && change.new.prefs && state) {
+                    const pr = change.new.prefs;
+                    if (Number(change.new.updated_at || 0) > Number(state.prefsUpdatedAt || 0) + 1200) {
+                      if (pr.wallpaper) state.wallpaper = pr.wallpaper;
+                      if (pr.customWallpaperUrl) state.customWallpaperUrl = pr.customWallpaperUrl;
+                      ensureSecurityDefaults();
+                      if (pr.disappearTimers) state.security.disappearTimers = Object.assign({}, state.security.disappearTimers, pr.disappearTimers);
+                      if (pr.lockedChats) state.security.lockedChats = Object.assign({}, state.security.lockedChats, pr.lockedChats);
+                      if (Array.isArray(pr.pinnedIds)) {
+                        state.security.pinnedIds = {};
+                        pr.pinnedIds.forEach(id => { state.security.pinnedIds[id] = true; });
+                        (state.chats || []).forEach(c => { c.pinned = Boolean(state.security.pinnedIds[c.id]); });
+                      }
+                      if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
+                      if (typeof pr.permissionsPrompted === 'boolean') state.security.permissionsPrompted = pr.permissionsPrompted;
+                      if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
+                      state.prefsUpdatedAt = Number(change.new.updated_at || Date.now());
+                      persistCurrentVault();
+                      safeBackgroundRender();
+                    }
+                    return;
+                  }
+                } catch (_) {}
+              })
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_blocks' }, () => scheduleSupaSync(200))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_status_views' }, (change) => {
+                try {
+                  if (change && change.new && change.new.status_id && change.new.viewer_id) {
+                    const net = getNetwork();
+                    const st = (net.statuses || []).find(x => x.id === change.new.status_id);
+                    if (st) {
+                      st.seenBy = st.seenBy || [];
+                      st.seenNames = st.seenNames || {};
+                      if (!st.seenBy.includes(change.new.viewer_id)) st.seenBy.push(change.new.viewer_id);
+                      if (change.new.viewer_name) st.seenNames[change.new.viewer_id] = change.new.viewer_name;
+                      saveNetwork(net, 'realtime_status_view');
+                      if (ui.activeStatusId) updateStatusViewersInPlace();
+                    }
+                  }
+                } catch (_) {}
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_users' }, (change) => {
                 try {
                   if (change && change.new && change.new.vault_id) {
@@ -3087,7 +3309,38 @@
                 } catch (_) {}
                 scheduleSupaSync(60);
               })
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_statuses' }, () => scheduleSupaSync(250))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_statuses' }, (change) => {
+                try {
+                  const net = getNetwork();
+                  net.statuses = net.statuses || [];
+                  if (change && change.eventType === 'DELETE' && change.old && change.old.id) {
+                    net.statuses = net.statuses.filter(s => s.id !== change.old.id);
+                    saveNetwork(net, 'realtime_status_del');
+                    syncFromNetwork();
+                    return;
+                  }
+                  if (change && change.new && change.new.id && change.new.payload) {
+                    const row = change.new;
+                    if (Number(row.expires_at || 0) <= Date.now()) {
+                      net.statuses = net.statuses.filter(s => s.id !== row.id);
+                    } else {
+                      const mapped = Object.assign({}, row.payload, {
+                        id: row.id,
+                        authorId: row.author_id || row.payload.authorId,
+                        authorName: row.author_name || row.payload.authorName,
+                        expiresAt: Number(row.expires_at || row.payload.expiresAt || (Date.now() + 86400000))
+                      });
+                      const idx = net.statuses.findIndex(s => s.id === mapped.id);
+                      if (idx >= 0) net.statuses[idx] = mapped;
+                      else net.statuses.unshift(mapped);
+                    }
+                    saveNetwork(net, 'realtime_status');
+                    syncFromNetwork();
+                    return;
+                  }
+                } catch (_) {}
+                scheduleSupaSync(200);
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_read_receipts' }, (change) => {
                 try {
                   if (change && change.new && change.new.room_id && change.new.user_id) {
@@ -3186,6 +3439,43 @@
               .on('broadcast', { event: 'typing' }, ({ payload }) => {
                 if (payload && payload.fromId !== activeVaultId && payload.roomId) markRemoteTyping(payload.roomId);
               })
+              .on('broadcast', { event: 'call_ring_fast' }, ({ payload }) => {
+                try {
+                  const c = payload;
+                  if (!c || !c.room_id || c.callee_id !== activeVaultId) return;
+                  const net = getNetwork();
+                  net.activeCalls = net.activeCalls || {};
+                  net.activeCalls[c.room_id] = {
+                    roomId: c.room_id, callerId: c.caller_id, callerName: c.caller_name,
+                    calleeId: c.callee_id, calleeName: c.callee_name, type: c.call_type,
+                    status: c.status || 'ringing', startedAt: c.started_at || Date.now()
+                  };
+                  saveNetwork(net, 'realtime_fast_call_ring');
+                  syncFromNetwork();
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'call_ended_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.roomId || payload.fromId === activeVaultId) return;
+                  const net = getNetwork();
+                  if (net.activeCalls && net.activeCalls[payload.roomId]) {
+                    delete net.activeCalls[payload.roomId];
+                    saveNetwork(net, 'realtime_fast_call_end');
+                  }
+                  if (ui.activeCall && ui.activeCall.roomId === payload.roomId) {
+                    closeWebRtc();
+                    stopIncomingRingtone();
+                    stopLocalCamera();
+                    clearInterval(callTimer);
+                    clearInterval(_callStatsTimer);
+                    clearInterval(_callHeartbeatTimer);
+                    releaseCallWakeLock();
+                    ui.activeCall = null;
+                    renderCallOverlay();
+                    showToast('Call ended');
+                  }
+                } catch (_) {}
+              })
               .on('broadcast', { event: 'call_accepted' }, ({ payload }) => {
                 if (!payload || !ui.activeCall || payload.fromId === activeVaultId) return;
                 if (payload.roomId === ui.activeCall.roomId && ui.activeCall.status === 'ringing') {
@@ -3248,7 +3538,7 @@
                     if (!st.seenBy.includes(payload.viewerId)) st.seenBy.push(payload.viewerId);
                     if (payload.viewerName) st.seenNames[payload.viewerId] = payload.viewerName;
                     saveNetwork(net, 'status_seen_rt');
-                    if (ui.modal === 'statusViewer') renderStatusViewer();
+                    if (ui.activeStatusId) updateStatusViewersInPlace();
                   }
                 } catch (_) {}
               })
@@ -3334,18 +3624,56 @@
         } catch (e) { /* REST polling fallback remains active */ }
 
         // Background reconciliation fallback (45s heartbeat when Realtime is SUBSCRIBED, 15s otherwise)
+        try {
+          getMergedChats().filter(c => c.isPeer).slice(0, 15).forEach(c => subscribeRoomChannel(c.id));
+        } catch (_) {}
+        let _fastCallPollInFlight = false;
         supaPollTimer = setInterval(() => {
           if (!activeVaultId || !state || !getSupaCfg()) return;
-          if (supaStatus === 'realtime' && (supaSyncTickCount % 3 !== 0)) { supaSyncTickCount += 1; return; }
-          syncWithSupabase();
-        }, 15000);
+          if (!document.hidden && !_fastCallPollInFlight) {
+            _fastCallPollInFlight = true;
+            const vidEnc = encodeURIComponent(activeVaultId);
+            supaFetch('shavlo_calls', 'GET', `?select=room_id,caller_id,caller_name,callee_id,callee_name,call_type,status,started_at&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`)
+              .then((rows) => {
+                if (!Array.isArray(rows)) return;
+                const net = getNetwork();
+                const prevKeys = Object.keys(net.activeCalls || {}).sort().join(',');
+                const nextCalls = {};
+                rows.forEach(c => {
+                  nextCalls[c.room_id] = {
+                    roomId: c.room_id, callerId: c.caller_id, callerName: c.caller_name,
+                    calleeId: c.callee_id, calleeName: c.callee_name, type: c.call_type,
+                    status: c.status, startedAt: c.started_at
+                  };
+                });
+                const nextKeys = Object.keys(nextCalls).sort().join(',');
+                const statusChanged = rows.some(c => {
+                  const prev = net.activeCalls && net.activeCalls[c.room_id];
+                  return !prev || prev.status !== c.status;
+                });
+                if (prevKeys !== nextKeys || statusChanged) {
+                  net.activeCalls = nextCalls;
+                  saveNetwork(net, 'fast_call_poll');
+                  syncFromNetwork();
+                }
+              })
+              .catch(() => {})
+              .finally(() => { _fastCallPollInFlight = false; });
+          }
+          supaSyncTickCount += 1;
+          if (supaSyncTickCount % 8 === 0) syncWithSupabase();
+        }, 1500);
       }
 
       function stopSupaPolling() {
         if (supaPollTimer) { clearInterval(supaPollTimer); supaPollTimer = null; }
-        if (supaClient && supaRealtimeChan) {
-          try { supaClient.removeChannel(supaRealtimeChan); } catch (e) {}
-          supaRealtimeChan = null;
+        if (supaClient) {
+          _roomChannels.forEach(ch => { try { supaClient.removeChannel(ch); } catch (_) {} });
+          _roomChannels.clear();
+          if (supaRealtimeChan) {
+            try { supaClient.removeChannel(supaRealtimeChan); } catch (e) {}
+            supaRealtimeChan = null;
+          }
         }
       }
 
@@ -3615,19 +3943,22 @@
             }
             if (status === 'connected') {
               startCallTimer();
-              if (liveCall.callerId === activeVaultId && !rtcPc) {
+              if (liveCall.callerId === activeVaultId && _offerSentRoom !== liveCall.roomId) {
                 startWebRtcOffer(liveCall.roomId, liveCall.calleeId, liveCall.type);
               }
             }
+            renderCallOverlay();
           }
         } else if (ui.activeCall && ui.activeCall.isPeer) {
           stopIncomingRingtone();
           closeWebRtc();
           stopLocalCamera();
           clearInterval(callTimer);
-        clearInterval(_callStatsTimer);
-        clearInterval(_callHeartbeatTimer);
+          clearInterval(_callStatsTimer);
+          clearInterval(_callHeartbeatTimer);
+          releaseCallWakeLock();
           ui.activeCall = null;
+          renderCallOverlay();
           showToast('Call ended');
         }
 
@@ -3681,16 +4012,7 @@
             }
           }
           if (isDesktop || state.mobileView === 'list') {
-            const listEl = document.getElementById('chats-scroll');
-            if (listEl) {
-              const tmp = document.createElement('div');
-              tmp.innerHTML = renderMessagesTab();
-              const nextList = tmp.querySelector('#chats-scroll');
-              if (nextList && listEl.innerHTML !== nextList.innerHTML) {
-                const prevTop = listEl.scrollTop;
-                listEl.innerHTML = nextList.innerHTML;
-                listEl.scrollTop = prevTop;
-              }
+            if (patchChatsScrollInPlace()) {
               updateMobileBottomBar();
               patchedAny = true;
             }
@@ -4782,11 +5104,14 @@
             startedAt: Date.now()
           };
           saveNetwork(net, 'call_ring');
-          supaWriteReliable('shavlo_calls', 'POST', '', {
+          const _callRow = {
             room_id: chat.id, caller_id: activeVaultId, caller_name: state.userProfile.name,
             callee_id: chat.peerVaultId, callee_name: chat.name, call_type: type,
             status: 'ringing', started_at: Date.now()
-          });
+          };
+          supaWriteReliable('shavlo_calls', 'POST', '', _callRow);
+          sendRoomBroadcast(chat.id, 'call_ring_fast', _callRow);
+          setTimeout(() => { if (ui.activeCall && ui.activeCall.roomId === chat.id && ui.activeCall.status === 'ringing') sendRoomBroadcast(chat.id, 'call_ring_fast', _callRow); }, 350);
           ui.activeCall = {
             chatId: chat.id,
             roomId: chat.id,
@@ -4836,14 +5161,8 @@
         }
         ui.activeCall.status = 'connected';
         ui.activeCall.seconds = 0;
-        if (supaRealtimeChan && ui.activeCall.isPeer) {
-          try {
-            supaRealtimeChan.send({
-              type: 'broadcast',
-              event: 'call_accepted',
-              payload: { roomId: ui.activeCall.roomId, fromId: activeVaultId, toId: call ? call.callerId : '', type: ui.activeCall.type }
-            });
-          } catch (_) {}
+        if (ui.activeCall.isPeer) {
+          sendRoomBroadcast(ui.activeCall.roomId, 'call_accepted', { roomId: ui.activeCall.roomId, fromId: activeVaultId, toId: call ? call.callerId : '', type: ui.activeCall.type });
         }
         renderCallOverlay();
         acquireCallWakeLock();
@@ -4861,10 +5180,13 @@
         clearInterval(_callStatsTimer);
         clearInterval(_callHeartbeatTimer);
         if (ui.activeCall && ui.activeCall.isPeer && ui.activeCall.roomId) {
+          const endedRoom = ui.activeCall.roomId;
           const net = getNetwork();
-          delete net.activeCalls[ui.activeCall.roomId];
+          delete net.activeCalls[endedRoom];
           saveNetwork(net, 'call_ended');
-          supaWriteReliable('shavlo_calls', 'DELETE', `?room_id=eq.${encodeURIComponent(ui.activeCall.roomId)}`);
+          supaWriteReliable('shavlo_calls', 'DELETE', `?room_id=eq.${encodeURIComponent(endedRoom)}`);
+          sendRoomBroadcast(endedRoom, 'call_ended_fast', { roomId: endedRoom, fromId: activeVaultId });
+          setTimeout(() => { sendRoomBroadcast(endedRoom, 'call_ended_fast', { roomId: endedRoom, fromId: activeVaultId }); }, 250);
         }
         ui.activeCall = null;
         renderCallOverlay();
@@ -4927,6 +5249,8 @@
         activeVaultId = vaultId;
         setActiveVaultId(vaultId);
         state = vaults[vaultId];
+        state.activeNav = 'messages';
+        state.mobileView = 'list';
         pruneExpiredLocalData();
         hydrateFromIDB();
         registerCurrentUserInDirectory();
@@ -4959,6 +5283,8 @@
         activeVaultId = vaultId;
         setActiveVaultId(vaultId);
         state = vaults[vaultId];
+        state.activeNav = 'messages';
+        state.mobileView = 'list';
         pruneExpiredLocalData();
         hydrateFromIDB();
         registerCurrentUserInDirectory();
@@ -4967,7 +5293,7 @@
         lastSyncedNetDigest = '';
         render();
         syncFromNetwork();
-        fetchLiveStats(true);
+        fetchLiveStats(true); refreshDynamicTurnServers();
         try { const _c = getSupaCfg(); if (_c && _c.url) fetch(_c.url + '/functions/v1/shavlo-sync', { method: 'GET' }).catch(() => {}); } catch (_) {}
         try { const net = getNetwork(); Object.keys(net.directory || {}).forEach(pid => { if (pid !== activeVaultId) deriveRoomAesKey(makeRoomId(activeVaultId, pid)); }); } catch (_) {}
         showToast(`Signed in as ${state.userProfile.name}`);
@@ -5466,6 +5792,7 @@
           if (inp) { inp.value = ''; inp.style.height = 'auto'; inp.focus({ preventScroll: true }); }
           const isFocused = document.activeElement && document.activeElement.id === 'message-input';
           if (typeof syncComposerActionButtons === 'function') syncComposerActionButtons(false, isFocused);
+          patchChatsScrollInPlace();
           scrollToBottom(false);
         } else {
           render();
@@ -6007,7 +6334,7 @@
           syncPrivateRoomFromCloud();
           try {
             if (window.supabase && typeof window.supabase.createClient === 'function') {
-              if (!supaClient) supaClient = window.supabase.createClient(cfg.url, cfg.key);
+              if (!supaClient) supaClient = window.supabase.createClient(cfg.url, cfg.key, { realtime: { params: { eventsPerSecond: 20 } } });
               privateRoomChan = supaClient
                 .channel('shavlo-priv-' + code)
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_messages', filter: `room_id=eq.${roomId}` }, () => syncPrivateRoomFromCloud())
@@ -6455,7 +6782,6 @@
         return `
           <div id="mobile-dock-wrap" style="bottom:max(1.35rem, env(safe-area-inset-bottom)); transform:translateZ(0); will-change:transform;" class="md:hidden fixed inset-x-3 z-30 pointer-events-none flex justify-center">
             <nav id="mobile-dock-nav" style="touch-action:none;" class="relative pointer-events-auto w-full max-w-[430px] grid grid-cols-5 items-center gap-2">
-              <div id="dock-glass-lens"></div>
               ${items.map(it => {
                 const active = state.activeNav === it.id;
                 const youPhoto = it.isProfile ? safeImgUrl(state.userProfile.avatarUrl) : '';
@@ -6530,6 +6856,25 @@
       }
 
       // UPDATES TAB — 24-Hour Statuses & Updates
+      function renderSegmentedStatusRing(count, isSeen) {
+        const n = Math.max(0, Number(count || 0));
+        if (n === 0) return '';
+        const r = 29;
+        const c = 2 * Math.PI * r;
+        const strokeCls = isSeen ? 'stroke-zinc-300 dark:stroke-zinc-700' : 'stroke-[#09090C] dark:stroke-white';
+        if (n === 1) {
+          return `<svg viewBox="0 0 64 64" class="pointer-events-none absolute -inset-[4px] w-[64px] h-[64px]" aria-hidden="true"><circle cx="32" cy="32" r="${r}" fill="none" stroke-width="2.6" class="${strokeCls}"/></svg>`;
+        }
+        const gap = n >= 8 ? 4.5 : (n >= 4 ? 5.5 : 6.5);
+        const dash = Math.max(3.5, (c / n) - gap);
+        const step = dash + gap;
+        const arcs = Array.from({ length: n }, (_, i) => {
+          const offset = -(i * step);
+          return `<circle cx="32" cy="32" r="${r}" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="${dash.toFixed(2)} ${(c - dash).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" class="${strokeCls}"/>`;
+        }).join('');
+        return `<svg viewBox="0 0 64 64" style="transform:rotate(-90deg);" class="pointer-events-none absolute -inset-[4px] w-[64px] h-[64px]" aria-hidden="true">${arcs}</svg>`;
+      }
+
       function renderUpdatesTab() {
         const statuses = getActiveStatuses();
         const myStatuses = statuses.filter(st => st.authorId === activeVaultId);
@@ -6564,9 +6909,10 @@
                   <h2 class="title-display text-[20px] font-bold tracking-[-0.02em] text-ink dark:text-white mb-3">Status</h2>
                   <div class="py-2 flex items-center justify-between gap-3">
                     <button data-action="${myStatuses.length > 0 ? 'open-status' : 'open-modal'}" ${myStatuses.length > 0 ? `data-id="${myStatuses[0].id}"` : 'data-modal="newStatus"'} class="flex items-center gap-3.5 min-w-0 text-left flex-1">
-                      <div class="relative shrink-0">
-                        <div class="${myStatuses.length > 0 ? 'status-ring-active' : ''} rounded-full">
-                          ${renderAvatar(getInitial(state.userProfile.name), state.userProfile.avatarUrl, 'w-14 h-14 text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+                      <div class="relative shrink-0 w-14 h-14">
+                        ${renderSegmentedStatusRing(myStatuses.length, false)}
+                        <div class="w-14 h-14 rounded-full overflow-hidden ${myStatuses.length > 0 ? 'p-[1.5px] bg-[#FAFAFC] dark:bg-[#0B0B0D]' : ''}">
+                          ${renderAvatar(getInitial(state.userProfile.name), (myStatuses.length > 0 && safeImgUrl(myStatuses[0].photoUrl)) ? myStatuses[0].photoUrl : state.userProfile.avatarUrl, 'w-full h-full text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
                         </div>
                       </div>
                       <div class="min-w-0">
@@ -6601,9 +6947,10 @@
                         return `
                           <button data-action="open-status" data-id="${st.id}" class="w-full py-3.5 flex items-center justify-between gap-3 text-left hover:bg-surface/60 dark:hover:bg-zinc-900/60 rounded-2xl px-2 transition">
                             <div class="flex items-center gap-3.5 min-w-0">
-                              <div class="${seen ? 'status-ring-seen' : 'status-ring-active'} rounded-full shrink-0">
-                                <div class="rounded-full border-2 border-white dark:border-[#0B0B0D]">
-                                  ${renderAvatar(st.avatarText, st.avatarUrl, 'w-14 h-14 text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
+                              <div class="relative shrink-0 w-14 h-14">
+                                ${renderSegmentedStatusRing(others.filter(x => x.authorId === st.authorId).length, seen)}
+                                <div class="w-14 h-14 rounded-full overflow-hidden p-[1.5px] bg-[#FAFAFC] dark:bg-[#0B0B0D]">
+                                  ${renderAvatar(st.avatarText, safeImgUrl(st.photoUrl) || st.avatarUrl, 'w-full h-full text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
                                 </div>
                               </div>
                               <div class="min-w-0">
@@ -6860,7 +7207,7 @@
                         </button>
                       </div>
                       <button data-action="select-chat" data-chat-item="${c.id}" data-id="${c.id}" style="touch-action: pan-y; transform: translateX(${isSwiped ? -222 : 0}px); transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);" class="relative z-10 w-full text-left px-3.5 py-3.5 rounded-2xl bg-[#FAFAFC] dark:bg-[#0B0B0D] flex items-center gap-4 select-none ${isSel ? 'md:bg-brand-50 md:dark:bg-brand-600/15' : ''} hover:bg-[#F3F3F7] dark:hover:bg-[#141418]">
-                        <div class="relative shrink-0">
+                        <div class="relative shrink-0" data-chat-av-wrap="${c.id}">
                           ${(ui.ringPingChats && ui.ringPingChats[c.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
                           ${renderAvatar(c.avatarText, c.avatarUrl, 'w-14 h-14 text-[17px] font-bold', c.isPeer ? 'bg-brand-500 text-white' : 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
                         </div>
@@ -6873,11 +7220,11 @@
                               ${isChatPinned(c) ? `<span class="text-brand-500">${icon('pin', 'w-3 h-3')}</span>` : ''}
                               ${isMuted ? `<span class="text-muted">${icon('mute', 'w-3 h-3')}</span>` : ''}
                             </span>
-                            <span class="text-[11.5px] font-medium tabular-nums tracking-[-0.01em] text-muted/85 shrink-0">${escapeHtml(c.lastTime)}</span>
+                            <span data-chat-time="${c.id}" class="text-[11.5px] font-medium tabular-nums tracking-[-0.01em] text-muted/85 shrink-0">${escapeHtml(c.lastTime)}</span>
                           </div>
                           <div class="flex items-center justify-between gap-2.5 mt-1">
-                            <p class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted truncate flex items-center gap-1">${lockedMap[c.id] ? '<span class="italic text-brand-500/85">Locked chat • Passcode required</span>' : (((c.messages && c.messages.length && c.messages[c.messages.length - 1].sender === 'me') ? renderTicks(c.messages[c.messages.length - 1].status, false) : '') + '<span class="truncate">' + escapeHtml(getLastPreview(c)) + '</span>')}</p>
-                            ${c.unread > 0 ? `<span class="min-w-[20px] h-5 px-1.5 rounded-full bg-brand-500 text-white text-[11px] font-bold tabular-nums flex items-center justify-center shrink-0">${c.unread}</span>` : ''}
+                            <p data-chat-preview="${c.id}" class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted truncate flex items-center gap-1">${lockedMap[c.id] ? '<span class="italic text-brand-500/85">Locked chat • Passcode required</span>' : (((c.messages && c.messages.length && c.messages[c.messages.length - 1].sender === 'me') ? renderTicks(c.messages[c.messages.length - 1].status, false) : '') + '<span class="truncate">' + escapeHtml(getLastPreview(c)) + '</span>')}</p>
+                            <span data-chat-unread="${c.id}">${c.unread > 0 ? `<span class="min-w-[20px] h-5 px-1.5 rounded-full bg-brand-500 text-white text-[11px] font-bold tabular-nums flex items-center justify-center shrink-0">${c.unread}</span>` : ''}</span>
                           </div>
                         </div>
                       </button>
@@ -9221,7 +9568,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const ph = document.getElementById('call-remote-placeholder');
           if (ph && remoteMediaStream.getVideoTracks().length > 0) ph.classList.add('hidden');
           const raud = document.getElementById('remote-vc-audio');
-          if (raud && raud.srcObject !== remoteMediaStream) { raud.srcObject = remoteMediaStream; raud.play().catch(() => {}); }
+          if (raud) {
+            raud.muted = Boolean(rvid);
+            if (!rvid && raud.srcObject !== remoteMediaStream) { raud.srcObject = remoteMediaStream; raud.play().catch(() => {}); }
+          }
         }
       }
 
@@ -9465,9 +9815,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         });
 
         Object.keys(searchHiddenState).forEach(k => delete searchHiddenState[k]);
+        ui._navTransition = '';
         app.innerHTML = `
           ${renderDesktopSidebar()}
-          <div class="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
+          <div id="main-stage-view" class="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
             ${mainView}
           </div>
         `;
@@ -9484,6 +9835,53 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }
 
       let statusCubeBusy = false;
+
+      function getStatusViewerList(st) {
+        const netDir = getNetwork().directory || {};
+        return ((st && st.seenBy) || []).filter(vid => vid && vid !== activeVaultId).map(vid => {
+          const u = netDir[vid] || {};
+          const vName = (st.seenNames && st.seenNames[vid]) || u.name || 'Contact';
+          return { id: vid, name: vName, avatarUrl: u.avatarUrl || '', initial: getInitial(vName) };
+        });
+      }
+      function buildStatusViewersSheetHtml(viewerList) {
+        return `
+          <div data-action="toggle-status-viewers" class="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end justify-center cursor-pointer">
+            <div style="padding-bottom:max(1.25rem, env(safe-area-inset-bottom));" class="animate-slide-up w-full max-w-lg rounded-t-[34px] bg-[#111114]/95 backdrop-blur-2xl border-t border-white/15 px-5 pt-3 text-white shadow-2xl">
+              <div class="w-10 h-1 rounded-full bg-white/30 mx-auto mb-3"></div>
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <svg class="w-4 h-4 text-[#C6A76D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <h4 class="title-display text-[16px] font-bold">Viewed by ${viewerList.length}</h4>
+                </div>
+              </div>
+              <div class="max-h-[45vh] overflow-y-auto thin-scroll divide-y divide-white/10">
+                ${viewerList.length === 0 ? `
+                  <p class="py-6 text-center text-[13px] text-white/60">No one has viewed this story yet.</p>
+                ` : viewerList.map(v => `
+                  <div class="py-2.5 flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                      ${renderAvatar(v.initial, v.avatarUrl, 'w-10 h-10 text-[13px] font-bold', 'bg-white/15 text-white')}
+                      <span class="text-[14.5px] font-semibold truncate">${escapeHtml(v.name)}</span>
+                    </div>
+                    <span class="text-[11.5px] text-[#C6A76D] font-semibold shrink-0">Seen</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      function updateStatusViewersInPlace() {
+        if (!ui.activeStatusId) return;
+        const st = getActiveStatuses().find(x => x.id === ui.activeStatusId);
+        if (!st) return;
+        const viewerList = getStatusViewerList(st);
+        const cntEl = document.getElementById('status-viewers-count');
+        if (cntEl) cntEl.textContent = String(viewerList.length);
+        const hostEl = document.getElementById('status-viewers-sheet-host');
+        if (hostEl) hostEl.innerHTML = ui.statusViewersOpen ? buildStatusViewersSheetHtml(viewerList) : '';
+      }
 
       function buildStatusFaceMarkup(st, idx, list, animateBar) {
         const isMine = st.authorId === activeVaultId;
@@ -9524,45 +9922,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
             <!-- Eye Seen Button (own status) + Slide-Up Viewers Pop-up Sheet -->
             ${isMine ? (() => {
-              const netDir = getNetwork().directory || {};
-              const viewerList = (st.seenBy || []).filter(vid => vid && vid !== activeVaultId).map(vid => {
-                const u = netDir[vid] || {};
-                const vName = (st.seenNames && st.seenNames[vid]) || u.name || 'Contact';
-                return { id: vid, name: vName, avatarUrl: u.avatarUrl || '', initial: getInitial(vName) };
-              });
+              const viewerList = getStatusViewerList(st);
               return `
                 <div class="relative z-20 mb-2 flex flex-col items-center">
                   <button type="button" data-action="toggle-status-viewers" title="Viewed by" class="px-3.5 py-1.5 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-[13px] font-semibold text-white inline-flex items-center gap-1.5 transition">
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                    <span class="tabular-nums">${viewerList.length}</span>
+                    <span id="status-viewers-count" class="tabular-nums">${viewerList.length}</span>
                   </button>
                 </div>
-                ${ui.statusViewersOpen ? `
-                  <div data-action="toggle-status-viewers" class="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end justify-center cursor-pointer">
-                    <div style="padding-bottom:max(1.25rem, env(safe-area-inset-bottom));" class="animate-slide-up w-full max-w-lg rounded-t-[34px] bg-[#111114]/95 backdrop-blur-2xl border-t border-white/15 px-5 pt-3 text-white shadow-2xl">
-                      <div class="w-10 h-1 rounded-full bg-white/30 mx-auto mb-3"></div>
-                      <div class="flex items-center justify-between mb-3">
-                        <div class="flex items-center gap-2">
-                          <svg class="w-4 h-4 text-[#C6A76D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                          <h4 class="title-display text-[16px] font-bold">Viewed by ${viewerList.length}</h4>
-                        </div>
-                      </div>
-                      <div class="max-h-[45vh] overflow-y-auto thin-scroll divide-y divide-white/10">
-                        ${viewerList.length === 0 ? `
-                          <p class="py-6 text-center text-[13px] text-white/60">No one has viewed this story yet.</p>
-                        ` : viewerList.map(v => `
-                          <div class="py-2.5 flex items-center justify-between gap-3">
-                            <div class="flex items-center gap-3 min-w-0">
-                              ${renderAvatar(v.initial, v.avatarUrl, 'w-10 h-10 text-[13px] font-bold', 'bg-white/15 text-white')}
-                              <span class="text-[14.5px] font-semibold truncate">${escapeHtml(v.name)}</span>
-                            </div>
-                            <span class="text-[11.5px] text-[#C6A76D] font-semibold shrink-0">Seen</span>
-                          </div>
-                        `).join('')}
-                      </div>
-                    </div>
-                  </div>
-                ` : ''}
+                <div id="status-viewers-sheet-host">${ui.statusViewersOpen ? buildStatusViewersSheetHtml(viewerList) : ''}</div>
               `;
             })() : ''}
             <div class="relative z-20 flex items-center justify-center gap-2.5">
@@ -9592,7 +9960,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             if (supaRealtimeChan) {
               try { supaRealtimeChan.send({ type: 'broadcast', event: 'status_seen_fast', payload: { id: liveSt.id, viewerId: activeVaultId, viewerName: state && state.userProfile ? state.userProfile.name : '' } }); } catch (_) {}
             }
-            supaWriteReliable('shavlo_statuses', 'PATCH', `?id=eq.${encodeURIComponent(liveSt.id)}`, { payload: liveSt });
+            supaWriteReliable('shavlo_status_views', 'POST', '', {
+              status_id: liveSt.id,
+              viewer_id: activeVaultId,
+              viewer_name: (state && state.userProfile && state.userProfile.name) || 'Friend',
+              viewed_at: Date.now()
+            });
           }
         } else if (state) {
           const samp = (state.sampleStatuses || []).find(x => x.id === stId);
@@ -9740,16 +10113,37 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         stage.addEventListener('touchcancel', onEnd, { passive: true });
       }
 
+      let _mountedStatusId = '';
       function renderStatusViewer() {
-        clearTimeout(statusAutoTimer);
-        statusCubeBusy = false;
         const root = document.getElementById('status-root');
         if (!root) return;
-        if (!ui.activeStatusId || !state) { root.innerHTML = ''; return; }
+        if (!ui.activeStatusId || !state) {
+          clearTimeout(statusAutoTimer);
+          statusCubeBusy = false;
+          _mountedStatusId = '';
+          if (root.innerHTML !== '') root.innerHTML = '';
+          return;
+        }
         const list = getActiveStatuses();
         const idx = list.findIndex(x => x.id === ui.activeStatusId);
-        if (idx === -1) { ui.activeStatusId = null; root.innerHTML = ''; return; }
+        if (idx === -1) {
+          clearTimeout(statusAutoTimer);
+          _mountedStatusId = '';
+          ui.activeStatusId = null;
+          root.innerHTML = '';
+          return;
+        }
         const st = list[idx];
+        if (_mountedStatusId === st.id && document.getElementById('status-cube-stage')) {
+          updateStatusViewersInPlace();
+          return;
+        }
+        _mountedStatusId = st.id;
+        clearTimeout(statusAutoTimer);
+        statusCubeBusy = false;
+        if (list[idx + 1] && list[idx + 1].photoUrl) {
+          try { const pre = new Image(); pre.src = safeImgUrl(list[idx + 1].photoUrl); } catch (_) {}
+        }
 
         root.innerHTML = `
           <div data-action="close-status-backdrop" class="status-cube-scene fixed inset-0 z-[75] bg-black flex items-center justify-center p-0 overflow-hidden">
@@ -9771,7 +10165,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
 
         statusAutoTimer = setTimeout(() => {
-          if (!ui.activeStatusId || statusCubeBusy) return;
+          if (!ui.activeStatusId || statusCubeBusy || ui.statusViewersOpen) return;
           transitionStatusCube(1, 0);
         }, 5000);
       }
@@ -9856,6 +10250,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (action === 'nav') {
           if (btn.dataset.nav === 'you' && suppressNextYouNav) { suppressNextYouNav = false; return; }
           if (suppressNextDockClick) { suppressNextDockClick = false; return; }
+          const _ord = ['updates', 'calls', 'groups', 'messages', 'you'];
+          const _prevI = _ord.indexOf(state.activeNav || 'messages');
+          const _nextI = _ord.indexOf(btn.dataset.nav || 'messages');
+          if (_prevI >= 0 && _nextI >= 0 && _prevI !== _nextI) ui._navTransition = _nextI > _prevI ? 'left' : 'right';
           state.activeNav = btn.dataset.nav;
           ui.attachMenuOpen = false;
           saveUiNavState();
@@ -9877,6 +10275,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           }
           state.selectedChatId = btn.dataset.id;
           state.mobileView = 'chat';
+          ui._navTransition = 'left';
           ui.attachMenuOpen = false;
           ui.replyingTo = null;
           ui.inChatSearchOpen = false;
@@ -9888,7 +10287,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             ui.unreadJumpTarget = null;
           }
           if (c) c.unread = 0;
-          if (c && c.isPeer) { markRoomRead(c.id); deriveRoomAesKey(c.id); }
+          if (c && c.isPeer) { markRoomRead(c.id); deriveRoomAesKey(c.id); subscribeRoomChannel(c.id); }
           markPeerRoomRead(btn.dataset.id);
           persistCurrentVault();
           render();
@@ -9905,6 +10304,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           if (ui.walkieActive) stopWalkieTalkie();
           ui.mistPickerOpen = false; ui.mistNext = false; ui.mist24h = false;
           state.mobileView = 'list';
+          ui._navTransition = 'right';
           syncOwnPresence();
           render();
         } else if (action === 'toggle-theme') {
@@ -10944,7 +11344,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'toggle-status-viewers') {
           ui.statusViewersOpen = !ui.statusViewersOpen;
           if (ui.statusViewersOpen) clearTimeout(statusAutoTimer);
-          renderStatusViewer();
+          else {
+            clearTimeout(statusAutoTimer);
+            statusAutoTimer = setTimeout(() => {
+              if (!ui.activeStatusId || statusCubeBusy || ui.statusViewersOpen) return;
+              transitionStatusCube(1, 0);
+            }, 5000);
+          }
+          updateStatusViewersInPlace();
         } else if (action === 'close-status' || (action === 'close-status-backdrop' && e.target === btn)) {
           clearTimeout(statusAutoTimer);
           ui.activeStatusId = null;
@@ -11845,13 +12252,21 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
       });
 
+      let edgeBackCandidate = false, edgeBackActive = false, edgeBackDx = 0, pageSwipeTracking = false;
       document.addEventListener('touchstart', (e) => {
         swipingMsgEl = null;
+        edgeBackCandidate = false;
+        edgeBackActive = false;
+        edgeBackDx = 0;
+        pageSwipeTracking = false;
         swipingMsgId = null;
         swipingMsgDx = 0;
         if (e.touches && e.touches[0]) {
           touchStartX = e.touches[0].clientX;
           touchStartY = e.touches[0].clientY;
+          if (touchStartX <= 36 && state && state.activeNav === 'messages' && state.mobileView === 'chat' && !ui.modal && !ui.activeStatusId && !ui.activeCall && !ui.vaultLocked) {
+            edgeBackCandidate = true;
+          }
         }
         touchInScroller = !!(e.target && e.target.closest && e.target.closest('.overflow-x-auto'));
         const bubble = e.target && e.target.closest && e.target.closest('[data-msg-bubble]');
@@ -11886,6 +12301,25 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const dy = e.touches[0].clientY - touchStartY;
           if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
             clearTimeout(lpTimer);
+          }
+          if (edgeBackCandidate) {
+            if (!edgeBackActive) {
+              if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+                edgeBackCandidate = false;
+              } else if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+                edgeBackActive = true;
+              }
+            }
+            if (edgeBackActive) {
+              edgeBackDx = Math.max(0, Math.min(200, dx));
+              const mainChat = document.getElementById('active-chat-main');
+              if (mainChat) {
+                mainChat.style.transition = 'none';
+                mainChat.style.transform = `translate3d(${Math.round(edgeBackDx * 0.65)}px, 0, 0)`;
+                mainChat.style.boxShadow = '-14px 0 32px rgba(9, 9, 12, 0.14)';
+              }
+              return;
+            }
           }
           if (swipingChatEl) {
             if (!swipingChatDirLocked) {
@@ -11980,6 +12414,26 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
         clearTimeout(lpTimer);
         cancelPrivateHold();
+        if (edgeBackCandidate || edgeBackActive) {
+          const didBack = edgeBackActive && edgeBackDx >= 55;
+          const mainChat = document.getElementById('active-chat-main');
+          edgeBackCandidate = false;
+          edgeBackActive = false;
+          edgeBackDx = 0;
+          if (didBack && state && state.activeNav === 'messages' && state.mobileView === 'chat') {
+            if (ui.walkieActive) stopWalkieTalkie();
+            ui.mistPickerOpen = false; ui.mistNext = false; ui.mist24h = false;
+            state.mobileView = 'list';
+            ui._navTransition = 'right';
+            syncOwnPresence();
+            triggerHaptic(10);
+            render();
+            return;
+          } else if (mainChat) {
+            mainChat.style.transition = 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)';
+            mainChat.style.transform = 'translateX(0px)';
+          }
+        }
         if (swipingChatEl) {
           const el = swipingChatEl;
           const cid = swipingChatId;
@@ -12026,8 +12480,26 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (!e.changedTouches || !e.changedTouches[0]) return;
         const dx = e.changedTouches[0].clientX - touchStartX;
         const dy = e.changedTouches[0].clientY - touchStartY;
-        if (Math.abs(dy) > 60) return;
-        // Page left/right swipe disabled — vertical up/down scroll only
+        if (Math.abs(dy) > 90) return;
+        if (state.activeNav === 'messages' && state.mobileView === 'chat') return;
+        if (Math.abs(dx) >= 55 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+          const order = ['updates', 'calls', 'groups', 'messages', 'you'];
+          const curIdx = order.indexOf(state.activeNav || 'messages');
+          if (curIdx >= 0) {
+            const nextIdx = dx < 0 ? Math.min(order.length - 1, curIdx + 1) : Math.max(0, curIdx - 1);
+            if (nextIdx !== curIdx) {
+              ui._navTransition = nextIdx > curIdx ? 'left' : 'right';
+              state.activeNav = order[nextIdx];
+              ui.attachMenuOpen = false;
+              saveUiNavState();
+              persistCurrentVault();
+              syncOwnPresence();
+              render();
+              if (state.activeNav === 'messages') scrollToBottom();
+              return;
+            }
+          }
+        }
       }, { passive: true });
 
       let suppressMicClick = false;
@@ -12621,12 +13093,17 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       function getDockTabAtPoint(clientX) {
         const nav = document.getElementById('mobile-dock-nav');
         if (!nav) return null;
-        const btns = nav.querySelectorAll('button[data-nav]');
+        const btns = Array.from(nav.querySelectorAll('button[data-nav]'));
+        if (!btns.length) return null;
+        let best = null, bestDist = Infinity;
         for (let i = 0; i < btns.length; i++) {
           const r = btns[i].getBoundingClientRect();
-          if (clientX >= r.left - 6 && clientX <= r.right + 6) return btns[i];
+          if (clientX >= r.left && clientX <= r.right) return btns[i];
+          const mid = (r.left + r.right) / 2;
+          const d = Math.abs(clientX - mid);
+          if (d < bestDist) { bestDist = d; best = btns[i]; }
         }
-        return null;
+        return best;
       }
 
       function positionDockLens(clientX, snap) {
@@ -12661,9 +13138,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         dockScrubTargetNav = btn.dataset.nav;
         const nav = document.getElementById('mobile-dock-nav');
         if (nav && nav.setPointerCapture) { try { nav.setPointerCapture(e.pointerId); } catch (_) {} }
-        btn.style.transition = 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)';
-        btn.style.transform = 'scale(1.08)';
-        positionDockLens(e.clientX, true);
+
       }, { passive: true });
 
       document.addEventListener('pointermove', (e) => {
@@ -12675,16 +13150,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         dockLensRaf = requestAnimationFrame(() => {
           dockLensRaf = 0;
           if (!dockScrubActive) return;
-          positionDockLens(dockLensPendingX, false);
           const targetBtn = getDockTabAtPoint(dockLensPendingX);
-          const nav = document.getElementById('mobile-dock-nav');
-          if (nav) {
-            nav.querySelectorAll('button[data-nav]').forEach(b => {
-              const isHover = targetBtn && b === targetBtn;
-              b.style.transition = 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)';
-              b.style.transform = isHover ? 'scale(1.13)' : 'scale(1)';
-            });
-          }
           if (targetBtn && targetBtn.dataset.nav !== dockScrubTargetNav) {
             dockScrubTargetNav = targetBtn.dataset.nav;
             try { if (navigator.vibrate) navigator.vibrate(7); } catch (err) {}
@@ -12692,38 +13158,32 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         });
       }, { passive: true });
 
-      function endDockScrub() {
+      function endDockScrub(e) {
         if (!dockScrubActive) return;
-        const wasMoved = dockScrubMoved;
-        const chosenNav = dockScrubTargetNav;
+        const releaseX = (e && typeof e.clientX === 'number')
+          ? e.clientX
+          : ((e && e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : null);
+        const releaseBtn = (releaseX !== null) ? getDockTabAtPoint(releaseX) : null;
+        const chosenNav = (releaseBtn && releaseBtn.dataset && releaseBtn.dataset.nav) || dockScrubTargetNav;
         dockScrubActive = false;
         dockScrubMoved = false;
         dockScrubTargetNav = null;
-        const nav = document.getElementById('mobile-dock-nav');
-        if (nav) {
-          nav.querySelectorAll('button[data-nav]').forEach(b => { b.style.transform = ''; });
-        }
-        if (wasMoved && chosenNav && state) {
+        if (chosenNav && state) {
           suppressNextDockClick = true;
-          setTimeout(() => { suppressNextDockClick = false; }, 120);
-          const targetBtn = nav && nav.querySelector(`button[data-nav="${chosenNav}"]`);
-          const lens = document.getElementById('dock-glass-lens');
-          if (targetBtn && lens) {
-            const r = targetBtn.getBoundingClientRect();
-            positionDockLens(r.left + r.width / 2, true);
-          }
-          setTimeout(() => {
-            if (!state) return;
+          setTimeout(() => { suppressNextDockClick = false; }, 160);
+          if (state.activeNav !== chosenNav) {
+            const _ord = ['updates', 'calls', 'groups', 'messages', 'you'];
+            const _pi = _ord.indexOf(state.activeNav || 'messages');
+            const _ni = _ord.indexOf(chosenNav || 'messages');
+            if (_pi >= 0 && _ni >= 0) ui._navTransition = _ni > _pi ? 'left' : 'right';
             state.activeNav = chosenNav;
             ui.attachMenuOpen = false;
+            saveUiNavState();
             persistCurrentVault();
             syncOwnPresence();
             render();
             if (state.activeNav === 'messages') scrollToBottom();
-          }, 90);
-        } else {
-          const lens = document.getElementById('dock-glass-lens');
-          if (lens) lens.style.opacity = '0';
+          }
         }
       }
       document.addEventListener('pointerup', endDockScrub, { passive: true });
@@ -12780,15 +13240,15 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (vaults[existingId]) {
           activeVaultId = existingId;
           state = vaults[existingId];
+          state.activeNav = 'messages';
+          state.mobileView = 'list';
           try {
-            const rawUiNav = sessionStorage.getItem('shavlo_ui_nav_v1');
-            if (rawUiNav) {
-              const parsedNav = JSON.parse(rawUiNav);
-              if (parsedNav && parsedNav.vaultId === existingId) {
-                if (parsedNav.activeNav) state.activeNav = parsedNav.activeNav;
-                if (parsedNav.youTab) ui.youTab = parsedNav.youTab;
-                if (parsedNav.settingsSubTab) ui.settingsSubTab = parsedNav.settingsSubTab;
-              }
+            const pendingChat = sessionStorage.getItem('shavlo_pending_chat');
+            if (pendingChat) {
+              sessionStorage.removeItem('shavlo_pending_chat');
+              state.activeNav = 'messages';
+              state.selectedChatId = pendingChat;
+              state.mobileView = 'chat';
             }
           } catch (_) {}
           if (state.userProfile && String(state.userProfile.friendCode || '').length > 10) {
