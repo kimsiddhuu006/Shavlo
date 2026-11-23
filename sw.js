@@ -1,5 +1,5 @@
 // shavlo Service Worker — Offline Shell Cache + Rich Web Push + Quick Reply + Background Sync
-const CACHE_NAME = 'shavlo-shell-v230';
+const CACHE_NAME = 'shavlo-shell-v233';
 const MEDIA_CACHE = 'shavlo-media-cache-v1';
 const SHELL_ASSETS = ['./', './index.html', './manifest.webmanifest'];
 

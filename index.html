@@ -2907,7 +2907,7 @@
             : '?select=id,room_id,author_id,author_name,payload,created_at,expires_at&order=created_at.desc&limit=150';
 
           const vidEnc = encodeURIComponent(activeVaultId);
-          const [users, reqs, friends, groups, msgsRaw, statuses, statusViewsRows, calls, readReceipts, upiTxns, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
+          const [users, reqs, friends, groups, msgsRaw, statuses, statusViewsRows, calls, readReceipts, upiTxns, upiContactsRows, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
             fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=id,from_id,from_name,from_code,to_id,to_name,to_code,created_time&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
@@ -2917,7 +2917,8 @@
             fetchStatuses ? supaFetch('shavlo_status_views', 'GET', '?select=status_id,viewer_id,viewer_name').catch(() => []) : Promise.resolve(null),
             supaFetch('shavlo_calls', 'GET', `?select=room_id,caller_id,caller_name,callee_id,callee_name,call_type,status,started_at&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
             supaFetch('shavlo_read_receipts', 'GET', '?select=room_id,user_id,last_delivered_at,last_read_at').catch(() => []),
-            supaFetch('shavlo_upi_txns', 'GET', `?select=id,room_id,sender_id,receiver_id,amount,note,status,created_at&or=(sender_id.eq.${vidEnc},receiver_id.eq.${vidEnc})&order=created_at.desc&limit=50`).catch(() => []),
+            supaFetch('shavlo_upi_txns', 'GET', `?select=id,room_id,sender_id,receiver_id,amount,note,status,tx_type,utr,receipt_sig,confirmed_by_receiver,created_at&or=(sender_id.eq.${vidEnc},receiver_id.eq.${vidEnc})&order=created_at.desc&limit=80`).catch(() => []),
+            supaFetch('shavlo_upi_contacts', 'GET', `?select=vpa,label,last_paid_at&owner_id=eq.${vidEnc}&order=last_paid_at.desc&limit=30`).catch(() => []),
             supaFetch('shavlo_blocks', 'GET', `?select=id,blocker_id,blocked_id,created_at&or=(blocker_id.eq.${vidEnc},blocked_id.eq.${vidEnc})`).catch(() => []),
             fetchUsers ? supaFetch('shavlo_sessions', 'GET', `?select=id,vault_id,device_name,last_active&vault_id=eq.${vidEnc}&order=last_active.desc&limit=10`).catch(() => null) : Promise.resolve(null),
             (forceFull || supaSyncTickCount === 1) ? supaFetch('shavlo_vault_items', 'GET', `?select=id,vault_id,payload,created_at&vault_id=eq.${vidEnc}&order=created_at.desc&limit=50`).catch(() => null) : Promise.resolve(null),
@@ -3047,14 +3048,19 @@
                   amount: Number(tx.amount || 0),
                   direction: isSent ? 'sent' : 'received',
                   note: tx.note || 'UPI Payment',
-                  status: tx.status === 'escrow_held' ? 'Escrow Held' : 'Settled',
-                  date: 'Synced',
+                  status: tx.confirmed_by_receiver ? 'Confirmed Received' : (tx.status === 'escrow_held' ? 'Escrow Held' : (tx.status === 'pending' ? 'Pending' : (tx.status === 'declined' ? 'Declined' : 'Settled'))),
+                  utr: tx.utr || '',
+                  receiptSig: tx.receipt_sig || '',
+                  date: tx.created_at ? new Date(Number(tx.created_at)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'Synced',
                   txnId: tx.id
                 });
                 upiAdded = true;
               }
             });
             if (upiAdded) persistCurrentVault();
+          }
+          if (Array.isArray(upiContactsRows) && upiContactsRows.length > 0 && state) {
+            state.upiContacts = upiContactsRows.map(c => ({ vpa: c.vpa, label: c.label || c.vpa, lastPaidAt: Number(c.last_paid_at || 0) }));
           }
           if (Array.isArray(blocksRows) && state) {
             ensureSecurityDefaults();
@@ -3531,6 +3537,41 @@
               })
               .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
                 handleWebRtcSignal(payload);
+              })
+              .on('broadcast', { event: 'upi_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || payload.sender_id === activeVaultId || payload.receiver_id !== activeVaultId || !state) return;
+                  state.upiHistory = state.upiHistory || [];
+                  if (!state.upiHistory.some(t => t.txnId === payload.id)) {
+                    state.upiHistory.unshift({
+                      id: payload.id,
+                      name: payload.senderName || 'Contact',
+                      upiId: payload.upiId || 'upi',
+                      amount: Number(payload.amount || 0),
+                      direction: 'received',
+                      note: payload.note || 'UPI Payment',
+                      status: payload.status === 'settled' ? 'Settled' : 'Pending',
+                      date: 'Just now',
+                      txnId: payload.id
+                    });
+                    persistCurrentVault();
+                    if (payload.status === 'remind') showToast(`${payload.senderName || 'Friend'} reminded you to pay ₹${Number(payload.amount || 0)}`);
+                    else if (payload.status === 'declined') showToast(`${payload.senderName || 'Friend'} declined ₹${Number(payload.amount || 0)} request`);
+                    else if (payload.status === 'confirmed_received') {
+                      const net = getNetwork();
+                      Object.values(net.peerChats || {}).forEach(list => {
+                        const hit = (list || []).find(m => m.txnId === payload.id);
+                        if (hit) hit.receiverConfirmed = true;
+                      });
+                      const hTx = (state.upiHistory || []).find(t => t.txnId === payload.id);
+                      if (hTx) hTx.status = 'Confirmed Received';
+                      saveNetwork(net, 'upi_confirmed');
+                      showToast(`${payload.senderName || 'Friend'} confirmed receiving ₹${Number(payload.amount || 0)}`);
+                    }
+                    else showToast(`Received ₹${Number(payload.amount || 0)} from ${payload.senderName || 'Contact'}`);
+                    if (ui.modal === 'upi' || state.activeNav === 'you' || state.selectedChatId) safeBackgroundRender();
+                  }
+                } catch (_) {}
               })
               .on('broadcast', { event: 'group_fast' }, ({ payload }) => {
                 try {
@@ -5912,11 +5953,6 @@
           renderModal();
           return false;
         }
-        if (num > 100000) {
-          ui.pinError = 'Single UPI transfer cannot exceed ₹1,00,000.';
-          renderModal();
-          return false;
-        }
         if (!verifyPinHash(cleanPin, state.security.masterPinHash)) {
           state.security.upiPinAttempts = (state.security.upiPinAttempts || 0) + 1;
           if (state.security.upiPinAttempts >= 3) {
@@ -5934,25 +5970,25 @@
         }
         state.security.upiPinAttempts = 0;
         state.security.upiPinLockedUntil = 0;
-        const limit = Number(state.security.dailyLimit) || 25000;
-        const spentToday = getTodaySpend();
-        if (spentToday + num > limit) {
-          ui.pinError = `Exceeds daily limit (${formatRupees(Math.max(0, limit - spentToday))} remaining today).`;
-          renderModal();
-          return false;
+
+        const pre = ui.upiPrefill || {};
+        const rawTarget = String(targetChatId || pre.chatId || state.selectedChatId || '');
+        const extVpa = rawTarget.startsWith('__ext__') ? rawTarget.slice(7) : '';
+        const chat = extVpa ? null : (getMergedChats().find(c => c.id === rawTarget) || null);
+        let receiverName = (pre.pn && String(pre.pn).trim()) || (chat ? chat.name : (extVpa || 'UPI Payee'));
+        let receiverUpi = (pre.pa && String(pre.pa).trim()) || extVpa || '';
+        if (!receiverUpi && chat) {
+          receiverUpi = await fetchLatestPeerUpi(chat);
         }
-        const chat = getMergedChats().find(c => c.id === (targetChatId || state.selectedChatId));
-        if (!chat) return false;
-        const receiverUpi = await fetchLatestPeerUpi(chat);
         if (!isValidUpiHandle(receiverUpi) || receiverUpi === 'friend@upi' || receiverUpi === 'contact@upi') {
-          ui.pinError = `${chat.name} hasn't added a valid UPI ID yet.`;
+          ui.pinError = chat ? `${chat.name} hasn't added a valid UPI ID yet.` : 'Select a friend or scan a valid UPI QR.';
           renderModal();
           return false;
         }
         const txnId = 'UPI' + String(Date.now()).slice(-10);
         const noteText = (note || 'UPI Payment').trim();
-        const upiUri = buildUpiPayUri(receiverUpi, chat.name, num, noteText, txnId);
-        if (chat.isPeer && activeVaultId) {
+        const upiUri = buildUpiPayUri(receiverUpi, receiverName, num, noteText, txnId);
+        if (chat && chat.isPeer && activeVaultId) {
           supaWriteReliable('shavlo_upi_txns', 'POST', '', {
             id: txnId,
             room_id: chat.id,
@@ -5966,9 +6002,9 @@
         }
         ui.pendingUpiPay = {
           txnId,
-          chatId: chat.id,
-          peerVaultId: chat.peerVaultId || '',
-          receiverName: chat.name,
+          chatId: chat ? chat.id : '',
+          peerVaultId: chat ? (chat.peerVaultId || '') : '',
+          receiverName,
           receiverUpi,
           amount: num,
           note: noteText,
@@ -5988,11 +6024,11 @@
       function finalizePendingUpiPay(utrRef) {
         const p = ui.pendingUpiPay;
         if (!p) return;
-        const chat = getMergedChats().find(c => c.id === p.chatId);
-        if (!chat) { ui.pendingUpiPay = null; ui.modal = null; renderModal(); return; }
+        const chat = p.chatId ? getMergedChats().find(c => c.id === p.chatId) : null;
         const cleanUtr = String(utrRef || '').trim();
         const finalNote = cleanUtr ? `${p.note} • UTR ${cleanUtr}` : p.note;
         const receiptSig = 'SIG-' + syncHash(`${p.txnId}:${p.amount}:${p.receiverUpi}:${activeVaultId}`).slice(0, 10);
+        const msgTime = nowTime();
         const msg = {
           id: 'm_' + Date.now(),
           sender: 'me',
@@ -6006,36 +6042,58 @@
           escrow: false,
           escrowStatus: 'settled',
           direction: 'sent',
-          time: nowTime(),
-          status: 'read',
+          time: msgTime,
+          status: 'sent',
           reactions: [],
           starred: false
         };
-        pushMessageToChat(chat, msg);
-        if (chat.isPeer && activeVaultId) {
-          supaWriteReliable('shavlo_upi_txns', 'PATCH', `?id=eq.${encodeURIComponent(p.txnId)}`, {
-            status: 'settled',
-            note: finalNote
-          });
+        if (chat) pushMessageToChat(chat, msg);
+        state.lastUpiAmount = p.amount;
+        if (activeVaultId && p.receiverUpi && (!chat || !chat.isPeer)) {
+          state.upiContacts = state.upiContacts || [];
+          const idxC = state.upiContacts.findIndex(c => c.vpa === p.receiverUpi);
+          const entryC = { vpa: p.receiverUpi, label: p.receiverName || p.receiverUpi, lastPaidAt: Date.now() };
+          if (idxC >= 0) state.upiContacts[idxC] = entryC; else state.upiContacts.unshift(entryC);
+          supaWriteReliable('shavlo_upi_contacts', 'POST', '?on_conflict=owner_id,vpa', { owner_id: activeVaultId, vpa: p.receiverUpi, label: entryC.label, last_paid_at: entryC.lastPaidAt });
         }
+        if (chat && chat.isPeer && activeVaultId) {
+          const nowTs = Date.now();
+          const settledRow = {
+            id: p.txnId,
+            room_id: chat.id,
+            sender_id: activeVaultId,
+            receiver_id: chat.peerVaultId || p.peerVaultId || '',
+            amount: p.amount,
+            note: finalNote,
+            status: 'settled',
+            tx_type: 'pay',
+            utr: cleanUtr,
+            receipt_sig: receiptSig,
+            created_at: nowTs
+          };
+          supaWriteReliable('shavlo_upi_txns', 'POST', '', settledRow);
+          supaWriteReliable('shavlo_upi_events', 'POST', '', { id: 'evt_' + p.txnId + '_' + nowTs, txn_id: p.txnId, actor_id: activeVaultId, event_type: 'settled', meta: { utr: cleanUtr }, created_at: nowTs });
+          sendRoomBroadcast(chat.id, 'upi_fast', Object.assign({}, settledRow, { senderName: (state.userProfile && state.userProfile.name) || 'Friend', upiId: p.receiverUpi }));
+        }
+        state.upiHistory = state.upiHistory || [];
         state.upiHistory.unshift({
           id: 'tx_' + Date.now(),
-          name: chat.name,
+          name: chat ? chat.name : (p.receiverName || p.receiverUpi),
           upiId: p.receiverUpi,
           amount: p.amount,
           direction: 'sent',
           note: finalNote,
           status: 'Settled',
           receiptSig,
-          date: 'Today, ' + msg.time,
+          date: 'Today, ' + msgTime,
           txnId: p.txnId
         });
         if (p.pre && (p.pre.requestMsgId || p.pre.splitMsgId)) {
           if (chat.isPeer) {
             const net = getNetwork();
             const list = net.peerChats[chat.id] || [];
-            if (p.pre.requestMsgId) { const rm = list.find(m => m.id === p.pre.requestMsgId); if (rm) rm.paid = true; }
-            if (p.pre.splitMsgId) { const sm = list.find(m => m.id === p.pre.splitMsgId); if (sm && sm.participants && sm.participants[p.pre.splitIdx]) sm.participants[p.pre.splitIdx].paid = true; }
+            if (p.pre.requestMsgId) { const rm = list.find(m => m.id === p.pre.requestMsgId); if (rm) { rm.paid = true; supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(rm.id)}`, { payload: rm }); } }
+            if (p.pre.splitMsgId) { const sm = list.find(m => m.id === p.pre.splitMsgId); if (sm && sm.participants && sm.participants[p.pre.splitIdx]) { sm.participants[p.pre.splitIdx].paid = true; supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(sm.id)}`, { payload: sm }); } }
             saveNetwork(net, 'peer_update');
           } else {
             if (p.pre.requestMsgId) { const rm = chat.messages.find(m => m.id === p.pre.requestMsgId); if (rm) rm.paid = true; }
@@ -6076,11 +6134,6 @@
           renderModal();
           return false;
         }
-        if (num > 100000) {
-          ui.pinError = 'Single UPI transfer cannot exceed ₹1,00,000.';
-          renderModal();
-          return false;
-        }
         if (!verifyPinHash(cleanPin, state.security.masterPinHash)) {
           state.security.upiPinAttempts = (state.security.upiPinAttempts || 0) + 1;
           if (state.security.upiPinAttempts >= 3) {
@@ -6098,13 +6151,7 @@
         }
         state.security.upiPinAttempts = 0;
         state.security.upiPinLockedUntil = 0;
-        const limit = Number(state.security.dailyLimit) || 25000;
-        const spentToday = getTodaySpend();
-        if (spentToday + num > limit) {
-          ui.pinError = `Exceeds daily limit (${formatRupees(Math.max(0, limit - spentToday))} remaining today).`;
-          renderModal();
-          return false;
-        }
+
         paymentLockGuard = true;
         setTimeout(() => { paymentLockGuard = false; }, 600);
         const chat = getMergedChats().find(c => c.id === (targetChatId || state.selectedChatId));
@@ -6209,16 +6256,48 @@
         ui.pinError = '';
         render();
         scrollToBottom();
+        if (chat.isPeer && activeVaultId) {
+          supaWriteReliable('shavlo_upi_txns', 'POST', '', {
+            id: 'REQ_' + Date.now(), room_id: chat.id, sender_id: activeVaultId,
+            receiver_id: chat.peerVaultId || '', amount: num, note: (note || 'Payment Request').trim(),
+            status: 'pending', tx_type: 'request', created_at: Date.now()
+          });
+        }
         showToast(`Requested ${formatRupees(num)}`);
       }
 
-      function createSplitBill(title, totalAmount) {
+      function createSplitBill(title, totalAmount, formEl) {
         const total = Number(totalAmount);
         if (!title.trim() || !total || total <= 0) { showToast('Enter a title and amount'); return; }
         const chat = getSelectedChat();
         if (!chat) return;
-        const people = chat.isGroup && chat.members ? chat.members : [chat.name, 'You'];
-        const perPerson = Math.ceil(total / people.length);
+        const allPeople = chat.isGroup && chat.members ? chat.members : [chat.name, 'You'];
+        const mode = ui.splitMode || 'equal';
+        let participants = [];
+        if (formEl) {
+          const checked = Array.from(formEl.querySelectorAll('input[name="splitMember"]:checked')).map(el => el.value);
+          const people = checked.length >= 1 ? checked : allPeople;
+          if (mode === 'exact') {
+            participants = people.map(name => {
+              const inp = formEl.querySelector(`input[data-split-val="${CSS.escape(name)}"]`);
+              const amt = Math.max(0, Math.round((Number(inp ? inp.value : 0) || 0) * 100) / 100);
+              return { name, amount: amt || Math.ceil(total / people.length), paid: name === 'You' };
+            });
+          } else if (mode === 'percent') {
+            participants = people.map(name => {
+              const inp = formEl.querySelector(`input[data-split-val="${CSS.escape(name)}"]`);
+              const pct = Math.max(0, Number(inp ? inp.value : 0) || (100 / people.length));
+              return { name, amount: Math.round((total * pct / 100) * 100) / 100, paid: name === 'You' };
+            });
+          } else {
+            const per = Math.ceil(total / people.length);
+            participants = people.map(name => ({ name, amount: per, paid: name === 'You' }));
+          }
+        } else {
+          const per = Math.ceil(total / allPeople.length);
+          participants = allPeople.map(name => ({ name, amount: per, paid: name === 'You' }));
+        }
+        const perPerson = participants.length ? (participants[0].amount || Math.ceil(total / participants.length)) : total;
         pushMessageToChat(chat, {
           id: 'm_' + Date.now(),
           sender: 'me',
@@ -6227,7 +6306,8 @@
           title: title.trim(),
           total,
           perPerson,
-          participants: people.map(name => ({ name, paid: name === 'You' })),
+          splitMode: mode,
+          participants,
           time: nowTime(),
           status: 'read',
           reactions: [],
@@ -7597,13 +7677,23 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (msg.type === 'upi') {
           const stLabel = msg.escrow
             ? (msg.escrowStatus === 'released' ? 'Escrow Released' : msg.escrowStatus === 'refunded' ? 'Escrow Refunded' : 'Escrow Protected • Held')
-            : 'UPI Verified • Settled';
+            : (msg.receiverConfirmed ? 'Confirmed Received ✓' : 'UPI Verified • Settled');
           body = `
             <div class="w-60 sm:w-68 p-1">
               <div class="text-[11px] font-semibold uppercase tracking-wider opacity-85">${stLabel}</div>
               <div class="title-display text-[24px] font-bold mt-0.5">${formatRupees(msg.amount)}</div>
               <div class="text-[13px] opacity-90">${escapeHtml(msg.note)}</div>
               <div class="text-[10.5px] font-sans tabular-nums opacity-75 mt-1.5 truncate">${escapeHtml(msg.upiId)} ${msg.receiptSig ? '• ' + escapeHtml(msg.receiptSig) : ''}</div>
+              <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                <button type="button" data-action="open-upi-receipt" data-txnid="${escapeHtml(msg.txnId || msg.id)}" data-name="${escapeHtml(isMe ? (chat ? chat.name : 'Contact') : (msg.senderName || 'Contact'))}" data-upi="${escapeHtml(msg.upiId || '')}" data-amt="${Number(msg.amount || 0)}" data-note="${escapeHtml(msg.note || 'UPI Payment')}" data-sig="${escapeHtml(msg.receiptSig || '')}" data-date="${escapeHtml(msg.time || '')}" class="px-3 py-1 rounded-full ${isMe ? 'bg-white/20 text-white' : 'bg-black/[0.06] dark:bg-white/15 text-ink dark:text-white'} text-[11px] font-semibold">
+                  View Receipt
+                </button>
+                ${(!isMe && !msg.escrow && !msg.receiverConfirmed) ? `
+                  <button type="button" data-action="confirm-upi-received" data-msgid="${msg.id}" data-txnid="${escapeHtml(msg.txnId || '')}" data-amt="${Number(msg.amount || 0)}" class="px-3 py-1 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[11px] font-bold">
+                    Confirm Received
+                  </button>
+                ` : ''}
+              </div>
               ${msg.escrow && msg.escrowStatus === 'held' && isMe ? `
                 <div class="flex gap-1.5 mt-2.5">
                   <button data-action="escrow-release" data-msgid="${msg.id}" class="flex-1 py-1.5 rounded-full bg-white text-ink text-[12px] font-semibold">Release Funds</button>
@@ -7615,14 +7705,23 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (msg.type === 'request') {
           body = `
             <div class="w-56 sm:w-64 p-1">
-              <div class="text-[11px] font-semibold uppercase tracking-wider opacity-80">${msg.paid ? 'Request Paid' : 'UPI Payment Request'}</div>
+              <div class="text-[11px] font-semibold uppercase tracking-wider opacity-80">${msg.paid ? 'Request Paid ✓' : (msg.declined ? 'Request Declined' : 'UPI Payment Request')}</div>
               <div class="title-display text-[24px] font-bold mt-0.5">${formatRupees(msg.amount)}</div>
               <div class="text-[13px] opacity-90">${escapeHtml(msg.note)}</div>
-              ${!msg.paid ? `
-                <button data-action="fulfill-request" data-msgid="${msg.id}" data-amt="${msg.amount}" data-note="${escapeHtml(msg.note)}" class="mt-2.5 w-full py-1.5 rounded-full ${isMe ? 'bg-white text-ink' : 'bg-brand-500 text-white'} text-[12.5px] font-semibold">
-                  Pay ${formatRupees(msg.amount)} with PIN
+              ${(!msg.paid && !msg.declined) ? (isMe ? `
+                <button type="button" data-action="remind-upi-request" data-msgid="${msg.id}" data-amt="${msg.amount}" class="mt-2.5 w-full py-1.5 rounded-full bg-white text-[#09090C] text-[12.5px] font-semibold hover:opacity-90 transition">
+                  Remind
                 </button>
-              ` : ''}
+              ` : `
+                <div class="mt-2.5 flex items-center gap-1.5">
+                  <button type="button" data-action="fulfill-request" data-msgid="${msg.id}" data-amt="${msg.amount}" data-note="${escapeHtml(msg.note)}" class="flex-1 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold">
+                    Pay ${formatRupees(msg.amount)}
+                  </button>
+                  <button type="button" data-action="decline-upi-request" data-msgid="${msg.id}" class="px-3 py-1.5 rounded-full bg-black/10 dark:bg-white/15 text-[12px] font-semibold">
+                    Decline
+                  </button>
+                </div>
+              `) : ''}
             </div>
           `;
         } else if (msg.type === 'split') {
@@ -7634,14 +7733,16 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <span>${paid}/${msg.participants.length} paid</span>
               </div>
               <div class="font-semibold text-[15px]">${escapeHtml(msg.title)}</div>
-              <div class="text-[12.5px] opacity-80">Total ${formatRupees(msg.total)} • ${formatRupees(msg.perPerson)} each</div>
+              <div class="text-[12.5px] opacity-80">Total ${formatRupees(msg.total)}${msg.splitMode && msg.splitMode !== 'equal' ? ` • ${msg.splitMode === 'percent' ? '% split' : 'Custom split'}` : ` • ${formatRupees(msg.perPerson)} each`}</div>
               <div class="space-y-1.5 pt-1">
-                ${msg.participants.map((p, idx) => `
+                ${msg.participants.map((p, idx) => {
+                  const share = Number(p.amount || msg.perPerson || 0);
+                  return `
                   <div class="flex items-center justify-between text-[12.5px] px-2.5 py-1.5 rounded-2xl ${isMe ? 'bg-white/15' : 'bg-surface dark:bg-zinc-800'}">
-                    <span>${escapeHtml(p.name)}</span>
-                    ${p.paid ? '<span class="font-semibold text-ink dark:text-white">Paid</span>' : `<button data-action="pay-split" data-msgid="${msg.id}" data-idx="${idx}" class="px-2.5 py-0.5 rounded-full bg-brand-500 text-white text-[11px] font-semibold">${p.name === 'You' ? 'Pay ' + formatRupees(msg.perPerson) : 'Mark paid'}</button>`}
-                  </div>
-                `).join('')}
+                    <span>${escapeHtml(p.name)} <span class="opacity-70 text-[11px] tabular-nums">(${formatRupees(share)})</span></span>
+                    ${p.paid ? '<span class="font-semibold text-ink dark:text-white">Paid</span>' : `<button data-action="pay-split" data-msgid="${msg.id}" data-idx="${idx}" class="px-2.5 py-0.5 rounded-full bg-brand-500 text-white text-[11px] font-semibold">${p.name === 'You' ? 'Pay ' + formatRupees(share) : 'Mark paid'}</button>`}
+                  </div>`;
+                }).join('')}
               </div>
             </div>
           `;
@@ -7925,23 +8026,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       </button>
                     </div>
 
-                    ${(() => {
-                      ensureSecurityDefaults();
-                      const spent = Number(state.security.dailySpent || 0);
-                      const limit = Number(state.security.dailyLimit || 50000);
-                      const pct = Math.min(100, Math.round((spent / Math.max(1, limit)) * 100));
-                      return `
-                        <div class="p-4 rounded-2xl bg-surface dark:bg-zinc-900/90 space-y-2">
-                          <div class="flex items-center justify-between text-[12.5px]">
-                            <span class="font-semibold text-muted">Daily UPI limit used</span>
-                            <span class="font-bold text-ink dark:text-white">${formatRupees(spent)} / ${formatRupees(limit)}</span>
-                          </div>
-                          <div class="h-2 rounded-full bg-black/[0.06] dark:bg-white/[0.08] overflow-hidden">
-                            <div class="h-full rounded-full bg-brand-500 transition-all" style="width:${pct}%"></div>
-                          </div>
-                        </div>
-                      `;
-                    })()}
+
 
                     <div class="grid grid-cols-2 gap-2.5">
                       <button type="button" data-action="open-upi-tab" data-tab="send" class="h-12 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[14.5px] font-semibold shadow-md shadow-brand-500/20 inline-flex items-center justify-center gap-1.5 transition">
@@ -7952,21 +8037,38 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       </button>
                     </div>
 
-                    <!-- My UPI QR Code / QR Upload -->
-                    <div class="pt-4 border-t border-black/[0.06] dark:border-white/[0.08]">
+                    <!-- Scannable My UPI QR Card + Custom QR Upload -->
+                    <div class="pt-4 border-t border-black/[0.06] dark:border-white/[0.08] space-y-3">
                       <div class="flex items-center justify-between gap-3">
                         <div class="min-w-0">
-                          <div class="title-display text-[16px] font-bold tracking-[-0.02em] text-ink dark:text-white">My UPI QR Code</div>
-                          <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Upload your UPI QR code to share &amp; receive</div>
+                          <div class="title-display text-[16px] font-bold tracking-[-0.02em] text-ink dark:text-white">My UPI QR</div>
+                          <div class="text-[13px] text-muted">Instant scannable QR for ${escapeHtml(state.userProfile.upiId || 'your handle')}</div>
                         </div>
-                        <label for="upi-barcode-input" class="px-4 py-2 rounded-full bg-[#09090C] text-white dark:border dark:border-white/20 hover:opacity-90 text-[12.5px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition">
-                          ${safeImgUrl(state.userProfile.upiBarcodeUrl) ? 'Change' : '+ Upload QR Code'}
+                        <label for="upi-barcode-input" class="px-3.5 py-2 rounded-full bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition">
+                          ${safeImgUrl(state.userProfile.upiBarcodeUrl) ? 'Change Photo' : '+ Upload QR'}
                           <input id="upi-barcode-input" type="file" accept="image/*" class="hidden" />
                         </label>
                       </div>
+                      ${state.userProfile.upiId ? (() => {
+                        const qrAmt = Number(ui.myUpiQrAmt || 0);
+                        const myQrUri = `upi://pay?pa=${encodeURIComponent(state.userProfile.upiId)}&pn=${encodeURIComponent(state.userProfile.name || 'Shavlo User')}${qrAmt > 0 ? '&am=' + encodeURIComponent(qrAmt.toFixed(2)) : ''}&cu=INR`;
+                        return `
+                        <div class="p-4 rounded-3xl bg-[#09090C] text-white border border-[#C6A76D]/35 flex flex-col sm:flex-row items-center gap-4">
+                          <div class="p-2 rounded-2xl bg-white shrink-0">
+                            <img src="${escapeHtml(generateUpiQrDataUrl(myQrUri))}" alt="My UPI QR" style="image-rendering:pixelated;" class="w-28 h-28 object-contain" />
+                          </div>
+                          <div class="flex-1 min-w-0 space-y-2.5 text-center sm:text-left w-full">
+                            <div class="text-[13px] font-bold truncate">${escapeHtml(state.userProfile.name)} • <span class="text-[#C6A76D]">${escapeHtml(state.userProfile.upiId)}</span></div>
+                            <div class="flex items-center gap-2">
+                              <input id="my-upi-qr-amt" type="number" min="0" step="any" value="${qrAmt > 0 ? qrAmt : ''}" placeholder="Optional ₹ amount" class="flex-1 min-w-0 h-9 px-3 rounded-full bg-white/10 text-[12.5px] text-white placeholder:text-white/50 focus:outline-none focus:ring-1 focus:ring-[#C6A76D]" />
+                              <button type="button" data-action="share-my-upi-qr" class="px-4 h-9 rounded-full bg-[#C6A76D] text-[#09090C] text-[12px] font-bold shrink-0">Share QR</button>
+                            </div>
+                          </div>
+                        </div>`;
+                      })() : ''}
                       ${safeImgUrl(state.userProfile.upiBarcodeUrl) ? `
-                        <div class="mt-3.5 p-3.5 rounded-2xl bg-surface dark:bg-zinc-900/90 flex flex-col sm:flex-row items-center gap-4">
-                          <img src="${escapeHtml(safeImgUrl(state.userProfile.upiBarcodeUrl))}" alt="My UPI QR Code" data-action="view-media" data-kind="photo" data-url="${escapeHtml(safeImgUrl(state.userProfile.upiBarcodeUrl))}" class="w-32 h-32 rounded-2xl object-contain bg-white p-1.5 border border-black/[0.06] cursor-pointer shrink-0 shadow-sm" />
+                        <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900/90 flex flex-col sm:flex-row items-center gap-4">
+                          <img src="${escapeHtml(safeImgUrl(state.userProfile.upiBarcodeUrl))}" alt="Uploaded UPI QR" data-action="view-media" data-kind="photo" data-url="${escapeHtml(safeImgUrl(state.userProfile.upiBarcodeUrl))}" class="w-24 h-24 rounded-2xl object-contain bg-white p-1.5 border border-black/[0.06] cursor-pointer shrink-0 shadow-sm" />
                           <div class="flex-1 min-w-0 flex flex-wrap items-center justify-center sm:justify-start gap-2">
                             <button type="button" data-action="share-upi-barcode" class="px-4 py-2 rounded-full bg-ink dark:bg-white text-white dark:text-ink text-[12.5px] font-semibold shadow-sm hover:opacity-90 transition">Share in Chat</button>
                             <button type="button" data-action="remove-upi-barcode" class="px-3.5 py-2 rounded-full bg-rose-50 dark:bg-rose-950/35 text-rose-600 dark:text-rose-400 text-[12.5px] font-semibold hover:bg-rose-100 transition">Remove</button>
@@ -7976,27 +8078,62 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     </div>
                   </div>
 
-                  <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3">
-                    <div class="flex items-center justify-between">
-                      <span class="title-display text-[16px] font-bold tracking-[-0.02em]">Verified UPI ledger</span>
-                      <span class="text-[12px] text-muted">${state.upiHistory.length} transactions</span>
-                    </div>
-                    ${state.upiHistory.length === 0 ? `
-                      <p class="text-[13px] text-muted py-3">No UPI transactions yet.</p>
-                    ` : `
-                      <div class="divide-y divide-zinc-100 dark:divide-zinc-900">
-                        ${state.upiHistory.map(tx => `
-                          <div class="py-2.5 flex items-center justify-between text-[13.5px]">
-                            <div class="min-w-0 pr-3">
-                              <div class="title-display text-[15px] font-bold tracking-[-0.02em] truncate">${escapeHtml(tx.name)}</div>
-                              <div class="text-[12px] text-muted truncate">${escapeHtml(tx.note)} • ${escapeHtml(tx.date)}</div>
-                              ${tx.receiptSig ? `<div class="text-[10.5px] font-sans tabular-nums text-brand-500">${escapeHtml(tx.receiptSig)} • ${escapeHtml(tx.status || 'Settled')}</div>` : ''}
-                            </div>
-                            <div class="font-bold shrink-0 ${tx.direction === 'received' ? 'text-ink dark:text-white' : ''}">${tx.direction === 'received' ? '+' : '-'}${formatRupees(tx.amount)}</div>
+                  <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-3.5">
+                    ${(() => {
+                      const allTx = state.upiHistory || [];
+                      const sentSum = allTx.filter(t => t.direction === 'sent').reduce((s, t) => s + Number(t.amount || 0), 0);
+                      const recvSum = allTx.filter(t => t.direction === 'received').reduce((s, t) => s + Number(t.amount || 0), 0);
+                      const f = ui.upiLedgerFilter || 'all';
+                      const q = String(ui.upiLedgerSearch || '').trim().toLowerCase();
+                      const filteredTx = allTx.filter(t => {
+                        if (f === 'sent' && t.direction !== 'sent') return false;
+                        if (f === 'received' && t.direction !== 'received') return false;
+                        if (f === 'pending' && String(t.status || '').toLowerCase() !== 'pending') return false;
+                        if (q && !`${t.name || ''} ${t.note || ''} ${t.upiId || ''} ${t.txnId || ''}`.toLowerCase().includes(q)) return false;
+                        return true;
+                      });
+                      return `
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="title-display text-[16px] font-bold tracking-[-0.02em]">Verified UPI ledger</span>
+                          <button type="button" data-action="export-upi-csv" class="px-3 py-1.5 rounded-full bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-ink dark:text-white hover:opacity-85 transition">Export CSV</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                          <div class="p-3 rounded-2xl bg-surface dark:bg-zinc-900">
+                            <div class="text-[11px] font-semibold text-muted">Total Sent</div>
+                            <div class="title-display text-[17px] font-extrabold tabular-nums mt-0.5">${formatRupees(sentSum)}</div>
                           </div>
-                        `).join('')}
-                      </div>
-                    `}
+                          <div class="p-3 rounded-2xl bg-surface dark:bg-zinc-900">
+                            <div class="text-[11px] font-semibold text-muted">Total Received</div>
+                            <div class="title-display text-[17px] font-extrabold text-[#C6A76D] tabular-nums mt-0.5">${formatRupees(recvSum)}</div>
+                          </div>
+                        </div>
+                        <input id="upi-ledger-search" type="search" value="${escapeHtml(ui.upiLedgerSearch || '')}" placeholder="Search name, note, UPI ID or UTR..." class="w-full h-9 px-3.5 rounded-full bg-surface dark:bg-zinc-900 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/40" />
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                          ${['all', 'sent', 'received', 'pending'].map(k => `
+                            <button type="button" data-action="upi-ledger-filter" data-filter="${k}" class="px-3 py-1 rounded-full text-[11.5px] font-semibold capitalize transition ${f === k ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'bg-surface dark:bg-zinc-900 text-muted'}">${k}</button>
+                          `).join('')}
+                        </div>
+                        ${filteredTx.length === 0 ? `
+                          <p class="text-[13px] text-muted py-3 text-center">No matching UPI transactions.</p>
+                        ` : `
+                          <div class="divide-y divide-zinc-100 dark:divide-zinc-900">
+                            ${filteredTx.map(tx => `
+                              <div class="py-2.5 flex items-center justify-between text-[13.5px] gap-2">
+                                <div class="min-w-0 pr-2">
+                                  <div class="title-display text-[15px] font-bold tracking-[-0.02em] truncate">${escapeHtml(tx.name)}</div>
+                                  <div class="text-[12px] text-muted truncate">${escapeHtml(tx.note)} • ${escapeHtml(tx.date)}</div>
+                                  ${tx.receiptSig || tx.status ? `<div class="text-[10.5px] font-sans tabular-nums text-[#C6A76D]">${escapeHtml(tx.receiptSig ? tx.receiptSig + ' • ' : '')}${escapeHtml(tx.status || 'Settled')}</div>` : ''}
+                                </div>
+                                <div class="text-right shrink-0 flex flex-col items-end gap-0.5">
+                                  <div class="font-bold tabular-nums ${tx.direction === 'received' ? 'text-[#C6A76D]' : ''}">${tx.direction === 'received' ? '+' : '-'}${formatRupees(tx.amount)}</div>
+                                  <button type="button" data-action="open-upi-receipt" data-txnid="${escapeHtml(tx.txnId || tx.id)}" data-name="${escapeHtml(tx.name || 'UPI Transfer')}" data-upi="${escapeHtml(tx.upiId || '')}" data-amt="${Number(tx.amount || 0)}" data-note="${escapeHtml(tx.note || 'UPI')}" data-sig="${escapeHtml(tx.receiptSig || '')}" data-date="${escapeHtml(tx.date || '')}" class="text-[10.5px] font-bold text-muted hover:text-ink underline underline-offset-2">Receipt</button>
+                                </div>
+                              </div>
+                            `).join('')}
+                          </div>
+                        `}
+                      `;
+                    })()}
                   </div>
                 ` : ui.youTab === 'account' ? `
                   <!-- Secret Vault (4-Digit Code Protected: Seed Phrase + Hidden Chats) -->
@@ -8863,6 +9000,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <span class="text-[12px] font-sans tabular-nums text-muted">${escapeHtml(chat.upiId)}</span>
               </button>
               ${chat.isLiveGroup ? `
+                <button type="button" data-action="open-modal" data-modal="groupLedger" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
+                  <span class="flex items-center gap-2.5"><span class="w-4 h-4 text-[#C6A76D] font-bold flex items-center justify-center">₹</span><span>Group Balances</span></span>
+                  <span class="text-[12px] text-[#C6A76D] font-semibold">Who owes whom</span>
+                </button>
                 <button type="button" data-action="copy-raw" data-text="${escapeHtml(chat.groupCode)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
                   <span class="flex items-center gap-2.5">${icon('groups', 'w-4 h-4 text-brand-500')}<span>Copy Group Invite Code</span></span>
                   <span class="text-[12px] font-sans tabular-nums text-brand-500">${escapeHtml(chat.groupCode)}</span>
@@ -8972,15 +9113,117 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <div class="mt-3 space-y-2.5">
               <input id="upi-utr-input" type="text" maxlength="24" placeholder="Optional UTR / Ref number" class="w-full h-10 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
               <div class="flex items-center gap-2">
+                <div class="w-full grid grid-cols-4 gap-1.5 mb-2">
+                  <a href="${escapeHtml(p.upiUri.replace('upi://pay', 'tez://upi/pay'))}" class="py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-center text-ink dark:text-white">GPay</a>
+                  <a href="${escapeHtml(p.upiUri.replace('upi://pay', 'phonepe://pay'))}" class="py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-center text-ink dark:text-white">PhonePe</a>
+                  <a href="${escapeHtml(p.upiUri.replace('upi://pay', 'paytmmp://pay'))}" class="py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-center text-ink dark:text-white">Paytm</a>
+                  <a href="${escapeHtml(p.upiUri)}" class="py-2 rounded-xl bg-[#C6A76D] text-[11.5px] font-bold text-center text-white">Any UPI</a>
+                </div>
                 <button type="button" data-action="confirm-upi-launch" class="flex-1 h-11 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-bold hover:opacity-90 transition">I've Paid • Confirm</button>
                 <button type="button" data-action="cancel-upi-launch" class="px-4 h-11 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-muted hover:text-ink transition">Cancel</button>
               </div>
             </div>
           `;
+        } else if (ui.modal === 'upiQrScanner') {
+          inner = `
+            <div class="w-full min-w-0 space-y-4">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <h3 class="title-display font-bold text-[19px]">Scan UPI QR</h3>
+                  <p id="upi-qr-scan-status" class="text-[12px] text-muted">Point camera at any UPI QR code</p>
+                </div>
+                <button type="button" data-action="back-to-upi" class="w-9 h-9 rounded-full bg-surface dark:bg-zinc-800 text-muted flex items-center justify-center">${icon('close', 'w-4 h-4')}</button>
+              </div>
+              <div class="relative w-full aspect-square max-w-[280px] mx-auto rounded-3xl overflow-hidden bg-zinc-950 ring-2 ring-[#C6A76D]/50">
+                <video id="upi-qr-video" playsinline muted autoplay class="w-full h-full object-cover"></video>
+                <div class="pointer-events-none absolute inset-8 rounded-2xl border-2 border-[#C6A76D]/80"></div>
+              </div>
+              <div class="grid grid-cols-2 gap-2.5">
+                <label for="upi-scan-qr-input" class="py-2.5 rounded-full bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-center cursor-pointer">
+                  Upload QR Photo
+                  <input id="upi-scan-qr-input" type="file" accept="image/*" class="sr-only" />
+                </label>
+                <button type="button" data-action="back-to-upi" class="py-2.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13px] font-bold">Back</button>
+              </div>
+            </div>
+          `;
+        } else if (ui.modal === 'upiReceipt' && ui.upiReceiptData) {
+          const r = ui.upiReceiptData;
+          inner = `
+            <div class="w-full min-w-0 space-y-4">
+              <div class="flex items-center justify-between">
+                <h3 class="title-display font-bold text-[19px]">Payment Receipt</h3>
+                <button type="button" data-action="close-modal" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-800 text-muted flex items-center justify-center">${icon('close', 'w-4 h-4')}</button>
+              </div>
+              <div class="p-5 rounded-3xl bg-[#09090C] text-white border border-[#C6A76D]/40 space-y-3 shadow-xl">
+                <div class="flex items-center justify-between">
+                  <span class="title-display font-extrabold text-[18px]">shavlo<span class="text-[#C6A76D]">.</span></span>
+                  <span class="px-2.5 py-0.5 rounded-full bg-[#C6A76D]/20 text-[#C6A76D] text-[11px] font-bold">SETTLED ✓</span>
+                </div>
+                <div class="title-display text-[32px] font-extrabold tabular-nums">${formatRupees(r.amt)}</div>
+                <div class="text-[13px] text-white/80">To ${escapeHtml(r.name)}${r.upi ? ` (${escapeHtml(r.upi)})` : ''}</div>
+                <div class="pt-2 border-t border-white/10 text-[11.5px] text-white/65 space-y-1 tabular-nums">
+                  <div>Note: ${escapeHtml(r.note || 'UPI Payment')}</div>
+                  <div>Txn ID: ${escapeHtml(r.txnId)}</div>
+                  ${r.sig ? `<div>Signature: ${escapeHtml(r.sig)}</div>` : ''}
+                  ${r.date ? `<div>Time: ${escapeHtml(r.date)}</div>` : ''}
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2.5">
+                <button type="button" data-action="download-upi-receipt" class="py-2.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13px] font-bold">Download PNG</button>
+                <button type="button" data-action="close-modal" class="py-2.5 rounded-full bg-surface dark:bg-zinc-900 text-[13px] font-semibold">Close</button>
+              </div>
+            </div>
+          `;
+        } else if (ui.modal === 'groupLedger' && chat) {
+          const splits = (chat.messages || []).filter(m => m.type === 'split' && Array.isArray(m.participants));
+          const owedRows = [];
+          splits.forEach(sp => {
+            const payer = sp.sender === 'me' ? 'You' : (sp.senderName || 'Creator');
+            sp.participants.forEach((p, idx) => {
+              if (!p.paid && p.name !== payer) {
+                owedRows.push({ from: p.name, to: payer, amt: Number(p.amount || sp.perPerson || 0), title: sp.title || 'Split', msgId: sp.id, idx });
+              }
+            });
+          });
+          inner = `
+            <div class="w-full min-w-0 space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="title-display font-bold text-[19px]">Group Balances</h3>
+                  <p class="text-[12px] text-muted">${escapeHtml(chat.name)} • Live Split Ledger</p>
+                </div>
+                <button type="button" data-action="close-modal" class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-800 text-muted flex items-center justify-center">${icon('close', 'w-4 h-4')}</button>
+              </div>
+              ${owedRows.length === 0 ? `
+                <div class="py-8 text-center rounded-3xl bg-surface dark:bg-zinc-900">
+                  <div class="font-bold text-[15px]">All settled up</div>
+                  <p class="text-[12.5px] text-muted mt-1">No pending split balances in this group.</p>
+                </div>
+              ` : `
+                <div class="space-y-2 max-h-64 overflow-y-auto thin-scroll">
+                  ${owedRows.map(o => `
+                    <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900 flex items-center justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="text-[13.5px] font-bold truncate">${escapeHtml(o.from)} → ${escapeHtml(o.to)}</div>
+                        <div class="text-[11.5px] text-muted truncate">${escapeHtml(o.title)}</div>
+                      </div>
+                      <div class="flex items-center gap-2 shrink-0">
+                        <span class="font-bold tabular-nums">${formatRupees(o.amt)}</span>
+                        ${o.from === 'You' ? `<button type="button" data-action="pay-split" data-msgid="${o.msgId}" data-idx="${o.idx}" class="px-3 py-1 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[11.5px] font-bold">Settle</button>` : ''}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          `;
         } else if (ui.modal === 'upi') {
           ensureSecurityDefaults();
-          const remaining = Math.max(0, ((state.security && state.security.dailyLimit) || 25000) - getTodaySpend());
           const pre = ui.upiPrefill || {};
+          const savedExt = Array.isArray(state.upiContacts) ? state.upiContacts : [];
+          const presetVals = [100, 500, 1000, 2000];
+          if (state.lastUpiAmount && !presetVals.includes(Number(state.lastUpiAmount))) presetVals.push(Number(state.lastUpiAmount));
           inner = `
             <div class="w-10 h-1 rounded-full bg-black/15 dark:bg-white/20 mx-auto mb-3 sm:hidden"></div>
             <div class="flex items-center justify-between mb-3 px-0.5 gap-2">
@@ -9017,12 +9260,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   ` : state.upiHistory.slice(0, 15).map(tx => `
                     <div class="p-3.5 rounded-[22px] bg-black/[0.03] dark:bg-white/[0.05] border border-black/[0.05] dark:border-white/10 flex items-center justify-between gap-3">
                       <div class="min-w-0">
-                        <div class="text-[13.5px] font-bold tracking-[-0.01em] text-ink dark:text-white truncate">${escapeHtml(tx.to || tx.peer || 'UPI Transfer')}</div>
+                        <div class="text-[13.5px] font-bold tracking-[-0.01em] text-ink dark:text-white truncate">${escapeHtml(tx.name || tx.to || tx.peer || 'UPI Transfer')}</div>
                         <div class="text-[11.5px] text-muted truncate mt-0.5">${escapeHtml(tx.note || 'UPI')} • ${escapeHtml(tx.date || '')}</div>
                       </div>
-                      <div class="text-right shrink-0">
+                      <div class="text-right shrink-0 flex flex-col items-end gap-1">
                         <div class="title-display text-[14.5px] font-extrabold tabular-nums text-ink dark:text-white">${formatRupees(tx.amount || 0)}</div>
-                        <div class="text-[10.5px] font-semibold text-muted">${escapeHtml(tx.status || 'Settled')}</div>
+                        <button type="button" data-action="open-upi-receipt" data-txnid="${escapeHtml(tx.txnId || tx.id)}" data-name="${escapeHtml(tx.name || tx.to || tx.peer || 'UPI Transfer')}" data-upi="${escapeHtml(tx.upiId || '')}" data-amt="${Number(tx.amount || 0)}" data-note="${escapeHtml(tx.note || 'UPI')}" data-sig="${escapeHtml(tx.receiptSig || '')}" data-date="${escapeHtml(tx.date || '')}" class="text-[10.5px] font-bold text-[#C6A76D] underline underline-offset-2">Receipt</button>
                       </div>
                     </div>
                   `).join('')}
@@ -9049,7 +9292,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             ` : `
               <form id="upi-form" class="flex-1 min-h-0 flex flex-col justify-between">
                 <div class="space-y-3">
-                  <input type="hidden" name="chatId" value="${escapeHtml(chat ? chat.id : ((allChats[0] && allChats[0].id) || ''))}" />
+                  ${pre.pa ? `<input type="hidden" name="chatId" value="${escapeHtml(chat ? chat.id : '')}" />` : `
+                    <select name="chatId" class="w-full h-10 px-3.5 rounded-full bg-black/[0.035] dark:bg-white/[0.06] border border-black/[0.07] dark:border-white/10 text-[13px] font-semibold text-ink dark:text-white focus:outline-none">
+                      ${allChats.map(c => `<option value="${escapeHtml(c.id)}" ${(chat ? chat.id === c.id : allChats[0] && allChats[0].id === c.id) ? 'selected' : ''}>${escapeHtml(c.name)}${c.upiId ? ' • ' + escapeHtml(c.upiId) : ''}</option>`).join('')}
+                      ${savedExt.map(ec => `<option value="__ext__${escapeHtml(ec.vpa)}">${escapeHtml(ec.label || ec.vpa)} • ${escapeHtml(ec.vpa)}</option>`).join('')}
+                    </select>
+                  `}
                   <input type="hidden" name="mode" value="instant" />
                   <input type="hidden" id="upi-note-input" name="note" value="${escapeHtml(pre.note || (pre.scannedQr ? 'QR Scan Pay' : 'UPI Payment'))}" />
                   ${ui.pinError ? `<div class="px-3.5 py-2 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 text-[12px] font-medium text-center">${escapeHtml(ui.pinError)}</div>` : ''}
@@ -9063,17 +9311,17 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1">${chat ? escapeHtml(chat.name) : 'Amount'}</div>
                     <div class="flex items-center justify-center gap-1">
                       <span class="title-display text-[28px] font-extrabold text-ink dark:text-white">₹</span>
-                      <input id="upi-amount-input" name="amount" type="number" min="1" max="100000" step="any" required value="${escapeHtml(pre.amount || '')}" placeholder="500" class="w-36 bg-transparent title-display text-[32px] font-extrabold tabular-nums tracking-[-0.02em] text-center text-ink dark:text-white placeholder:text-zinc-300 dark:placeholder:text-zinc-600 focus:outline-none" />
+                      <input id="upi-amount-input" name="amount" type="number" min="1" step="any" required value="${escapeHtml(pre.amount || '')}" placeholder="500" class="w-36 bg-transparent title-display text-[32px] font-extrabold tabular-nums tracking-[-0.02em] text-center text-ink dark:text-white placeholder:text-zinc-300 dark:placeholder:text-zinc-600 focus:outline-none" />
                     </div>
                     <div class="mt-3 flex items-center justify-center gap-1.5 flex-wrap">
-                      ${[100, 250, 500, 1000].map(v => `<button type="button" data-action="upi-preset" data-val="${v}" class="px-3.5 py-1.5 rounded-full bg-white dark:bg-zinc-900 border border-black/[0.08] dark:border-white/15 hover:bg-[#09090C] hover:text-white dark:hover:bg-white dark:hover:text-[#09090C] text-[12px] font-semibold tabular-nums text-ink dark:text-zinc-200 transition">₹${v}</button>`).join('')}
+                      ${presetVals.slice(0, 5).map(v => `<button type="button" data-action="upi-preset" data-val="${v}" class="px-3.5 py-1.5 rounded-full bg-white dark:bg-zinc-900 border border-black/[0.08] dark:border-white/15 hover:bg-[#09090C] hover:text-white dark:hover:bg-white dark:hover:text-[#09090C] text-[12px] font-semibold tabular-nums text-ink dark:text-zinc-200 transition">₹${v}</button>`).join('')}
                     </div>
                   </div>
                   ${ui.upiTab === 'send' ? `
                     <div>
                       <div class="flex justify-between text-[12px] px-1 mb-1.5">
                         <label class="font-semibold text-muted">4-digit Master Passcode</label>
-                        <span class="text-muted tabular-nums">Limit left: ${formatRupees(remaining)}</span>
+
                       </div>
                       <input name="upiPin" type="password" inputmode="numeric" maxlength="4" required placeholder="••••" class="w-full h-11 px-4 rounded-full bg-black/[0.035] dark:bg-white/[0.06] border border-black/[0.07] dark:border-white/10 text-[18px] tracking-[0.5em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/25" />
                     </div>
@@ -9081,11 +9329,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </div>
                 ${ui.upiTab === 'send' ? `
                   <div class="grid grid-cols-3 gap-2 pt-2 shrink-0">
-                    <label for="upi-scan-qr-input" class="py-3 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12.5px] font-semibold text-ink dark:text-white hover:bg-black/[0.09] transition flex items-center justify-center gap-1.5 cursor-pointer">
+                    <button type="button" data-action="open-upi-qr-scanner" class="py-3 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12.5px] font-semibold text-ink dark:text-white hover:bg-black/[0.09] transition flex items-center justify-center gap-1.5">
                       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
                       <span>Scan QR</span>
-                      <input id="upi-scan-qr-input" type="file" accept="image/*" capture="environment" class="hidden" />
-                    </label>
+                    </button>
                     <button type="button" data-action="close-modal" class="py-3 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12.5px] font-semibold text-ink dark:text-white hover:bg-black/[0.09] transition">Cancel</button>
                     <button type="submit" class="py-3 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12.5px] font-bold hover:opacity-90 transition">Tap &amp; Pay</button>
                   </div>
@@ -9100,11 +9347,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
           `;
         } else if (ui.modal === 'split') {
+          const splitPeople = (chat && chat.isGroup && chat.members) ? chat.members : [chat ? chat.name : 'Friend', 'You'];
+          const sMode = ui.splitMode || 'equal';
           inner = `
             <h3 class="title-display font-bold text-[20px]">Split a bill</h3>
             <form id="split-form" class="mt-4 space-y-3">
               <input name="title" type="text" required placeholder="What is this bill for?" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
-              <input name="total" type="number" min="10" required placeholder="Total amount in ₹" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[16px] font-bold" />
+              <input name="total" type="number" min="1" step="any" required placeholder="Total amount in ₹" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[16px] font-bold" />
+              <div class="grid grid-cols-3 gap-1 p-1 rounded-full bg-surface dark:bg-zinc-900">
+                ${[{id:'equal',l:'Equal'},{id:'exact',l:'Exact ₹'},{id:'percent',l:'Percent %'}].map(opt => `
+                  <button type="button" data-action="split-mode" data-mode="${opt.id}" class="py-1.5 rounded-full text-[12px] font-semibold transition ${sMode === opt.id ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'text-muted'}">${opt.l}</button>
+                `).join('')}
+              </div>
+              <div class="p-3 rounded-2xl bg-surface dark:bg-zinc-900 space-y-2 max-h-40 overflow-y-auto thin-scroll">
+                <div class="text-[11.5px] font-semibold text-muted">Participants</div>
+                ${splitPeople.map(name => `
+                  <label class="flex items-center justify-between gap-2 text-[13px]">
+                    <span class="flex items-center gap-2 min-w-0">
+                      <input type="checkbox" name="splitMember" value="${escapeHtml(name)}" checked class="rounded accent-[#09090C]" />
+                      <span class="truncate font-medium">${escapeHtml(name)}</span>
+                    </span>
+                    ${sMode !== 'equal' ? `<input type="number" min="0" step="any" data-split-val="${escapeHtml(name)}" placeholder="${sMode === 'percent' ? '%' : '₹'}" class="w-20 h-7 px-2 rounded-lg bg-white dark:bg-zinc-800 text-[12px] text-right tabular-nums" />` : ''}
+                  </label>
+                `).join('')}
+              </div>
               <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900 space-y-2.5">
                 <div class="flex items-center justify-between gap-2">
                   <div>
@@ -10730,7 +10996,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             })();
           }
         } else if (action === 'close-modal' || (action === 'close-modal-backdrop' && e.target === btn)) {
-            if (typeof stopQrScanner === 'function') stopQrScanner();
+            if (typeof stopQrScanner === 'function') stopQrScanner(); if (typeof stopUpiQrScanner === 'function') stopUpiQrScanner();
             ui.pendingUnlockChatId = null;
             ui.photoDraft = null;
             ui.shavloVaultPinError = '';
@@ -10871,7 +11137,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             if (msg.participants[idx].name === 'You') {
               ui.upiTab = 'send';
               ui.pinError = '';
-              ui.upiPrefill = { amount: msg.perPerson, note: 'Split: ' + msg.title, splitMsgId: msg.id, splitIdx: idx };
+              ui.upiPrefill = { amount: Number(msg.participants[idx].amount || msg.perPerson || 0), note: 'Split: ' + msg.title, splitMsgId: msg.id, splitIdx: idx };
               ui.modal = 'upi';
               renderModal();
             } else if (chat.isPeer) {
@@ -11019,7 +11285,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.modal = 'friendQrZoom';
           renderModal();
         } else if (action === 'back-to-friends') {
-          if (typeof stopQrScanner === 'function') stopQrScanner();
+          if (typeof stopQrScanner === 'function') stopQrScanner(); if (typeof stopUpiQrScanner === 'function') stopUpiQrScanner();
           ui.modal = 'friendsHub';
           renderModal();
         } else if (action === 'pick-friend-qr-file') {
@@ -11346,6 +11612,138 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           if (oldAvatarUrl) deleteMediaFromSupabaseStorage(oldAvatarUrl);
           pushUserToSupabase();
           showToast('Profile photo deleted from device & Supabase');
+        } else if (action === 'open-upi-qr-scanner') {
+          ui.modal = 'upiQrScanner';
+          renderModal();
+          setTimeout(() => startUpiQrScanner(), 40);
+        } else if (action === 'back-to-upi') {
+          stopUpiQrScanner();
+          ui.modal = 'upi';
+          renderModal();
+        } else if (action === 'decline-upi-request') {
+          const chat = getSelectedChat();
+          const mid = btn.dataset.msgid;
+          if (chat && mid) {
+            const list = chat.isPeer ? ((getNetwork().peerChats && getNetwork().peerChats[chat.id]) || []) : (chat.messages || []);
+            const rm = list.find(m => m.id === mid);
+            if (rm) {
+              rm.declined = true;
+              if (chat.isPeer) {
+                const net = getNetwork();
+                saveNetwork(net, 'upi_declined');
+                supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(rm.id)}`, { payload: rm });
+                sendRoomBroadcast(chat.id, 'upi_fast', { id: 'decl_' + mid, sender_id: activeVaultId, receiver_id: chat.peerVaultId || '', amount: rm.amount, note: 'Declined request', status: 'declined', senderName: (state.userProfile && state.userProfile.name) || 'Friend' });
+              } else {
+                persistCurrentVault();
+              }
+              render();
+              showToast('Request declined');
+            }
+          }
+        } else if (action === 'confirm-upi-received') {
+          const chat = getSelectedChat();
+          const mid = btn.dataset.msgid;
+          const txnId = btn.dataset.txnid || '';
+          const amt = Number(btn.dataset.amt || 0);
+          if (chat && mid) {
+            const list = chat.isPeer ? ((getNetwork().peerChats && getNetwork().peerChats[chat.id]) || []) : (chat.messages || []);
+            const um = list.find(m => m.id === mid);
+            if (um) {
+              um.receiverConfirmed = true;
+              const nowTs = Date.now();
+              if (chat.isPeer) {
+                const net = getNetwork();
+                saveNetwork(net, 'upi_confirmed');
+                supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(um.id)}`, { payload: um });
+                if (txnId) {
+                  supaWriteReliable('shavlo_upi_txns', 'PATCH', `?id=eq.${encodeURIComponent(txnId)}`, { confirmed_by_receiver: true, confirmed_at: nowTs });
+                  supaWriteReliable('shavlo_upi_events', 'POST', '', { id: 'evt_' + txnId + '_' + nowTs, txn_id: txnId, actor_id: activeVaultId, event_type: 'receiver_confirmed', meta: { amt }, created_at: nowTs });
+                  sendRoomBroadcast(chat.id, 'upi_fast', { id: txnId, sender_id: activeVaultId, receiver_id: chat.peerVaultId || '', amount: amt, status: 'confirmed_received', senderName: (state.userProfile && state.userProfile.name) || 'Friend' });
+                }
+              } else {
+                persistCurrentVault();
+              }
+              render();
+              showToast('Confirmed payment received');
+            }
+          }
+        } else if (action === 'upi-ledger-filter') {
+          ui.upiLedgerFilter = btn.dataset.filter || 'all';
+          render();
+        } else if (action === 'export-upi-csv') {
+          const rows = [['Date', 'Name', 'UPI ID', 'Direction', 'Amount', 'Status', 'Note', 'Txn ID', 'Signature']];
+          (state.upiHistory || []).forEach(tx => {
+            rows.push([tx.date || '', tx.name || '', tx.upiId || '', tx.direction || '', Number(tx.amount || 0), tx.status || 'Settled', tx.note || '', tx.txnId || tx.id || '', tx.receiptSig || '']);
+          });
+          const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'shavlo-upi-ledger.csv';
+          a.click();
+          showToast('Exported UPI ledger CSV');
+        } else if (action === 'share-my-upi-qr') {
+          const amtInp = document.getElementById('my-upi-qr-amt');
+          const amt = Number(amtInp ? amtInp.value : 0);
+          const upi = state.userProfile.upiId || '';
+          const uri = `upi://pay?pa=${encodeURIComponent(upi)}&pn=${encodeURIComponent(state.userProfile.name || 'Shavlo User')}${amt > 0 ? '&am=' + encodeURIComponent(amt.toFixed(2)) : ''}&cu=INR`;
+          if (navigator.share) {
+            navigator.share({ title: 'Pay me on UPI', text: `Pay ${state.userProfile.name} (${upi})${amt > 0 ? ' ₹' + amt : ''}`, url: uri }).catch(() => {});
+          } else {
+            navigator.clipboard?.writeText(uri).catch(() => {});
+            showToast('UPI payment link copied');
+          }
+        } else if (action === 'split-mode') {
+          ui.splitMode = btn.dataset.mode || 'equal';
+          renderModal();
+        } else if (action === 'remind-upi-request') {
+          const chat = getSelectedChat();
+          const amt = Number(btn.dataset.amt || 0);
+          if (chat && chat.isPeer) {
+            sendRoomBroadcast(chat.id, 'upi_fast', { id: 'rem_' + Date.now(), sender_id: activeVaultId, receiver_id: chat.peerVaultId || '', amount: amt, note: 'Friendly UPI reminder', status: 'remind', senderName: (state.userProfile && state.userProfile.name) || 'Friend' });
+            showToast('Reminder sent');
+          }
+        } else if (action === 'open-upi-receipt') {
+          ui.upiReceiptData = {
+            txnId: btn.dataset.txnid || ('UPI' + Date.now()),
+            name: btn.dataset.name || 'Contact',
+            upi: btn.dataset.upi || '',
+            amt: Number(btn.dataset.amt || 0),
+            note: btn.dataset.note || 'UPI Payment',
+            sig: btn.dataset.sig || '',
+            date: btn.dataset.date || ''
+          };
+          ui.modal = 'upiReceipt';
+          renderModal();
+        } else if (action === 'download-upi-receipt') {
+          const r = ui.upiReceiptData;
+          if (r) {
+            const c = document.createElement('canvas');
+            c.width = 720; c.height = 520;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#09090C';
+            ctx.fillRect(0, 0, 720, 520);
+            ctx.strokeStyle = '#C6A76D'; ctx.lineWidth = 4;
+            ctx.strokeRect(24, 24, 672, 472);
+            ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 34px sans-serif';
+            ctx.fillText('shavlo. Receipt', 54, 88);
+            ctx.fillStyle = '#C6A76D'; ctx.font = 'bold 20px sans-serif';
+            ctx.fillText('SETTLED', 560, 86);
+            ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 64px sans-serif';
+            ctx.fillText('₹' + Number(r.amt || 0).toLocaleString('en-IN'), 54, 184);
+            ctx.fillStyle = '#D4D4D8'; ctx.font = '24px sans-serif';
+            ctx.fillText('To: ' + r.name + (r.upi ? ' (' + r.upi + ')' : ''), 54, 242);
+            ctx.fillText('Note: ' + (r.note || 'UPI Payment'), 54, 290);
+            ctx.fillStyle = '#A1A1AA'; ctx.font = '20px sans-serif';
+            ctx.fillText('Txn ID: ' + r.txnId, 54, 355);
+            if (r.sig) ctx.fillText('Sig: ' + r.sig, 54, 392);
+            if (r.date) ctx.fillText('Time: ' + r.date, 54, 429);
+            const a = document.createElement('a');
+            a.href = c.toDataURL('image/png');
+            a.download = `shavlo-receipt-${r.txnId}.png`;
+            a.click();
+            showToast('Receipt PNG downloaded');
+          }
         } else if (action === 'confirm-upi-launch') {
           const utrEl = document.getElementById('upi-utr-input');
           finalizePendingUpiPay(utrEl ? utrEl.value : '');
@@ -11734,7 +12132,19 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       });
 
       document.addEventListener('input', (e) => {
-        if (e.target.id === 'chat-search-input') {
+        if (e.target.id === 'my-upi-qr-amt') {
+          ui.myUpiQrAmt = Number(e.target.value || 0);
+          clearTimeout(window._myQrTimer);
+          window._myQrTimer = setTimeout(() => render(), 250);
+        } else if (e.target.id === 'upi-ledger-search') {
+          ui.upiLedgerSearch = e.target.value || '';
+          clearTimeout(window._upiSearchTimer);
+          window._upiSearchTimer = setTimeout(() => {
+            render();
+            const el = document.getElementById('upi-ledger-search');
+            if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+          }, 180);
+        } else if (e.target.id === 'chat-search-input') {
           ui.searchQuery = e.target.value;
           const pos = e.target.selectionStart;
           render();
@@ -11871,6 +12281,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         hydrateFromIDB();
         registerCurrentUserInDirectory();
           pushUserToSupabase();
+          broadcastProfileFast();
           render();
           renderModal();
           showToast('UPI ID saved & synced');
@@ -11997,7 +12408,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (e.target.id === 'split-form') {
           e.preventDefault();
           const fd = new FormData(e.target);
-          createSplitBill(fd.get('title'), fd.get('total'));
+          createSplitBill(fd.get('title'), fd.get('total'), e.target);
         } else if (e.target.id === 'shavlo-vault-pin-form') {
           e.preventDefault();
           const pin = String(new FormData(e.target).get('pin') || '').trim();
@@ -12271,11 +12682,32 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             }
           })();
         } else if (e.target && e.target.id === 'upi-scan-qr-input' && e.target.files && e.target.files[0]) {
+          const qrFile = e.target.files[0];
           e.target.value = '';
-          ui.upiTab = 'send';
-          ui.upiPrefill = { ...(ui.upiPrefill || {}), scannedQr: true, note: 'QR Scan Pay' };
-          renderModal();
-          showToast('QR scanned • Enter amount & Tap & Pay');
+          (async () => {
+            const raw = await decodeQrFromFile(qrFile);
+            if (!raw) {
+              showToast('Could not read UPI QR — try a clearer photo');
+              return;
+            }
+            let pa = '', pn = '', am = '', tn = 'QR Scan Pay';
+            try {
+              if (/^upi:\/\//i.test(raw)) {
+                const u = new URL(raw);
+                pa = (u.searchParams.get('pa') || '').trim();
+                pn = (u.searchParams.get('pn') || '').trim();
+                am = (u.searchParams.get('am') || '').trim();
+                tn = (u.searchParams.get('tn') || tn).trim();
+              } else {
+                const m = raw.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)/);
+                if (m) pa = m[1];
+              }
+            } catch (_) {}
+            ui.upiTab = 'send';
+            ui.upiPrefill = { ...(ui.upiPrefill || {}), scannedQr: true, pa, pn, amount: am || (ui.upiPrefill && ui.upiPrefill.amount) || '', note: tn };
+            renderModal();
+            showToast(pa ? `Scanned ${pn || pa}` : 'QR scanned • Enter amount & Tap & Pay');
+          })();
         } else if (e.target && (e.target.id === 'upi-barcode-input' || e.target.id === 'upi-modal-qr-input') && e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
           e.target.value = '';
@@ -13597,6 +14029,64 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         syncVvHeight();
       }
       render();
+
+      let _upiQrStream = null, _upiQrTimer = null, _upiQrBusy = false;
+      function stopUpiQrScanner() {
+        if (_upiQrTimer) { clearInterval(_upiQrTimer); _upiQrTimer = null; }
+        _upiQrBusy = false;
+        if (_upiQrStream) { try { _upiQrStream.getTracks().forEach(t => t.stop()); } catch (_) {} _upiQrStream = null; }
+        const v = document.getElementById('upi-qr-video');
+        if (v) { try { v.srcObject = null; } catch (_) {} }
+      }
+      async function startUpiQrScanner() {
+        stopUpiQrScanner();
+        const vid = document.getElementById('upi-qr-video');
+        const st = document.getElementById('upi-qr-scan-status');
+        if (!vid || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          if (st) st.textContent = 'Camera unavailable — tap Upload QR Photo below.';
+          return;
+        }
+        try {
+          _upiQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+          vid.srcObject = _upiQrStream;
+          await vid.play();
+          const c = document.createElement('canvas');
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          _upiQrTimer = setInterval(async () => {
+            if (_upiQrBusy || ui.modal !== 'upiQrScanner' || !vid.videoWidth) return;
+            _upiQrBusy = true;
+            try {
+              const s = Math.min(1, 640 / Math.max(vid.videoWidth, vid.videoHeight));
+              c.width = Math.round(vid.videoWidth * s); c.height = Math.round(vid.videoHeight * s);
+              ctx.drawImage(vid, 0, 0, c.width, c.height);
+              const raw = await decodeQrFromCanvas(c);
+              if (raw) {
+                let pa = '', pn = '', am = '', tn = 'QR Scan Pay';
+                if (/^upi:\/\//i.test(raw)) {
+                  const u = new URL(raw);
+                  pa = (u.searchParams.get('pa') || '').trim();
+                  pn = (u.searchParams.get('pn') || '').trim();
+                  am = (u.searchParams.get('am') || '').trim();
+                  tn = (u.searchParams.get('tn') || tn).trim();
+                } else {
+                  const m = raw.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)/);
+                  if (m) pa = m[1];
+                }
+                if (pa) {
+                  stopUpiQrScanner();
+                  ui.upiTab = 'send';
+                  ui.upiPrefill = { ...(ui.upiPrefill || {}), scannedQr: true, pa, pn, amount: am || '', note: tn };
+                  ui.modal = 'upi';
+                  renderModal();
+                  showToast(`Scanned ${pn || pa}`);
+                }
+              }
+            } catch (_) {} finally { _upiQrBusy = false; }
+          }, 180);
+        } catch (_) {
+          if (st) st.textContent = 'Camera blocked — tap Upload QR Photo below.';
+        }
+      }
 
       let _qrScanStream = null;
       let _qrScanTimer = null;
