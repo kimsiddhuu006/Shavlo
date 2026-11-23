@@ -588,9 +588,7 @@
     .kb-open #message-feed {
       padding-bottom: 84px !important;
     }
-    html, body, button, [data-action], a, label { touch-action: manipulation; }
-    .kb-open #composer-dock { padding-bottom: 6px !important; }
-    [data-action]:active { transform: scale(0.96); transition: transform 90ms cubic-bezier(0.22, 1, 0.36, 1); }
+    #app, #chats-scroll, #message-feed { -webkit-backface-visibility: hidden; backface-visibility: hidden; }
   </style>
 </head>
 <body class="font-sans bg-white dark:bg-[#0B0B0D] text-ink dark:text-[#F4F4F6] selection:bg-brand-100 dark:selection:bg-brand-600/40">
@@ -751,7 +749,7 @@
         const cached = _avatarHtmlCache.get(key);
         if (cached) return cached;
         const out = cleanUrl
-          ? `<img src="${cleanUrl}" loading="lazy" decoding="async" alt="Profile" class="${sizeCls} rounded-full object-cover shrink-0 ring-2 ring-white/90 dark:ring-white/25 shadow-[0_4px_14px_-2px_rgba(0,0,0,0.22)]" />`
+          ? `<img src="${cleanUrl}" alt="Profile" class="${sizeCls} rounded-full object-cover shrink-0 ring-2 ring-white/90 dark:ring-white/25 shadow-[0_4px_14px_-2px_rgba(0,0,0,0.22)]" />`
           : `<span class="${sizeCls} rounded-full ${fallbackCls} title-display font-bold flex items-center justify-center shrink-0 ring-2 ring-white/85 dark:ring-white/20 shadow-[0_4px_14px_-2px_rgba(0,0,0,0.16)]">${escapeHtml(initial)}</span>`;
         if (_avatarHtmlCache.size > 300) _avatarHtmlCache.clear();
         _avatarHtmlCache.set(key, out);
@@ -1501,7 +1499,7 @@
       function broadcastTyping(roomId) {
         if (!roomId || !activeVaultId) return;
         const now = Date.now();
-        if (now - lastTypingSentAt < 1200) return;
+        if (now - lastTypingSentAt < 450) return;
         lastTypingSentAt = now;
         if (liveChannel) {
           try { liveChannel.postMessage({ type: 'peer_typing', roomId, fromId: activeVaultId }); } catch (err) {}
@@ -1601,20 +1599,6 @@
       }
       setInterval(() => { if (activeVaultId && state && !document.hidden) syncOwnPresence(); }, 8000);
       window.addEventListener('beforeunload', () => { syncOwnPresence(true); });
-      let _edgeBackStartX = 0, _edgeBackStartY = 0;
-      document.addEventListener('touchstart', (e) => {
-        const t = e.touches && e.touches[0];
-        if (!t || window.innerWidth >= 768 || !state || state.activeNav !== 'messages' || state.mobileView !== 'chat' || ui.activeCall || ui.modal) {
-          _edgeBackStartX = 0;
-          return;
-        }
-        if (t.clientX < 34) {
-          _edgeBackStartX = t.clientX;
-          _edgeBackStartY = t.clientY;
-        } else {
-          _edgeBackStartX = 0;
-        }
-      }, { passive: true });
       document.addEventListener('touchend', (e) => {
         if (!_edgeBackStartX) return;
         const t = e.changedTouches && e.changedTouches[0];
@@ -1628,19 +1612,6 @@
           render();
         }
       }, { passive: true });
-      document.addEventListener('input', (e) => {
-        if (e.target && e.target.id === 'message-input') {
-          e.target.style.height = 'auto';
-          e.target.style.height = Math.min(112, e.target.scrollHeight) + 'px';
-        }
-      });
-      document.addEventListener('keydown', (e) => {
-        if (e.target && e.target.id === 'message-input' && e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          const form = e.target.closest('form');
-          if (form) form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-        }
-      });
       if (navigator && navigator.serviceWorker && navigator.serviceWorker.addEventListener) {
         navigator.serviceWorker.addEventListener('message', (ev) => {
           if (!ev.data) return;
@@ -2021,17 +1992,12 @@
         return servers;
       }
 
-      function optimizeSupabaseImageUrl(url, width) {
-        if (!url || typeof url !== 'string') return url || '';
-        return url;
-      }
-
-      async function uploadMediaToSupabaseStorage(dataUrlOrFile, folder, extFallback, onProgress) {
+      async function uploadMediaToSupabaseStorage(dataUrlOrFile, folder, extFallback) {
         const cfg = getSupaCfg();
         if (!cfg || !dataUrlOrFile) return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
         try {
           let blob = null;
-          let ext = extFallback || 'webp';
+          let ext = extFallback || 'jpg';
           if (typeof dataUrlOrFile === 'string') {
             if (!dataUrlOrFile.startsWith('data:')) return dataUrlOrFile;
             const res = await fetch(dataUrlOrFile);
@@ -2044,43 +2010,14 @@
           if (!blob) return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
           const safeFolder = String(folder || 'chat').replace(/[^a-z0-9_-]/gi, '');
           const objPath = `${safeFolder}/${activeVaultId || 'anon'}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
-          const endpoint = `${cfg.url}/storage/v1/object/shavlo-media/${objPath}`;
-          const sendOnce = () => new Promise((resolve, reject) => {
-            if (typeof XMLHttpRequest !== 'undefined') {
-              const xhr = new XMLHttpRequest();
-              xhr.open('POST', endpoint, true);
-              xhr.setRequestHeader('apikey', cfg.key);
-              xhr.setRequestHeader('Content-Type', blob.type || 'application/octet-stream');
-              xhr.setRequestHeader('x-upsert', 'true');
-              xhr.setRequestHeader('cache-control', 'public, max-age=31536000, immutable');
-              if (cfg.key && cfg.key.startsWith('eyJ')) xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.key);
-              xhr.upload.onprogress = (ev) => {
-                if (ev.lengthComputable && typeof onProgress === 'function') {
-                  onProgress(Math.min(99, Math.round((ev.loaded / ev.total) * 100)));
-                }
-              };
-              xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  if (typeof onProgress === 'function') onProgress(100);
-                  resolve(true);
-                } else {
-                  reject(new Error('Storage HTTP ' + xhr.status));
-                }
-              };
-              xhr.onerror = () => reject(new Error('Network error'));
-              xhr.send(blob);
-            } else {
-              const headers = { 'apikey': cfg.key, 'Content-Type': blob.type || 'application/octet-stream', 'x-upsert': 'true', 'cache-control': 'public, max-age=31536000, immutable' };
-              if (cfg.key && cfg.key.startsWith('eyJ')) headers['Authorization'] = 'Bearer ' + cfg.key;
-              fetch(endpoint, { method: 'POST', headers, body: blob }).then(r => r.ok ? resolve(true) : reject(new Error('HTTP ' + r.status))).catch(reject);
-            }
+          const headers = { 'apikey': cfg.key, 'Content-Type': blob.type || 'application/octet-stream', 'x-upsert': 'true' };
+          if (cfg.key && cfg.key.startsWith('eyJ')) headers['Authorization'] = 'Bearer ' + cfg.key;
+          const upRes = await fetch(`${cfg.url}/storage/v1/object/shavlo-media/${objPath}`, {
+            method: 'POST',
+            headers,
+            body: blob
           });
-          try {
-            await sendOnce();
-          } catch (_) {
-            // Resumable single retry on flaky mobile networks
-            await sendOnce();
-          }
+          if (!upRes.ok) throw new Error('Storage HTTP ' + upRes.status);
           return `${cfg.url}/storage/v1/object/public/shavlo-media/${objPath}`;
         } catch (e) {
           return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
@@ -2327,7 +2264,7 @@
         try {
           const pc = await ensureWebRtcPeer(roomId, peerId, callType);
           if (!pc || pc.signalingState !== 'stable') return;
-          const offer = enableOpusDtx(await pc.createOffer());
+          const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           _preCreatedOffer = { roomId, sdp: offer };
         } catch (_) {}
@@ -2343,7 +2280,7 @@
             sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp });
             return;
           }
-          const offer = enableOpusDtx(await pc.createOffer());
+          const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: offer });
         } catch (e) {}
@@ -2368,7 +2305,7 @@
           if (sig.kind === 'offer' && sig.sdp) {
             await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
             await flushPendingIce(pc);
-            const answer = enableOpusDtx(await pc.createAnswer());
+            const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             sendWebRtcSignal(payload.roomId, payload.fromId, { kind: 'answer', sdp: answer });
           } else if (sig.kind === 'answer' && sig.sdp) {
@@ -2742,14 +2679,14 @@
 
           const vidEnc = encodeURIComponent(activeVaultId);
           const [users, reqs, friends, groups, msgsRaw, statuses, calls, readReceipts, upiTxns, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
-            fetchUsers ? supaFetch('shavlo_users', 'GET', `?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at${lastUserSyncAt > 0 && !forceFull ? '&updated_at=gt.' + lastUserSyncAt : ''}`) : Promise.resolve(null),
+            fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=id,from_id,from_name,from_code,to_id,to_name,to_code,created_time&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
             supaFetch('shavlo_groups', 'GET', '?select=id,code,name,description,creator_id,member_ids,admin_ids,created_at'),
             supaFetch('shavlo_messages', 'GET', msgQuery),
             fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=id,author_id,author_name,payload,expires_at&expires_at=gt.${Date.now()}`) : Promise.resolve(null),
             supaFetch('shavlo_calls', 'GET', `?select=room_id,caller_id,caller_name,callee_id,callee_name,call_type,status,started_at&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
-            (() => { const rIds = (getNetwork().friendships || []).filter(f => f.users && f.users.includes(activeVaultId)).map(f => makeRoomId(f.users[0], f.users[1])); return rIds.length ? supaFetch('shavlo_read_receipts', 'GET', `?select=room_id,user_id,last_delivered_at,last_read_at&room_id=in.(${rIds.map(encodeURIComponent).join(',')})`) : Promise.resolve([]); })().catch(() => []),
+            supaFetch('shavlo_read_receipts', 'GET', '?select=room_id,user_id,last_delivered_at,last_read_at').catch(() => []),
             supaFetch('shavlo_upi_txns', 'GET', `?select=id,room_id,sender_id,receiver_id,amount,note,status,created_at&or=(sender_id.eq.${vidEnc},receiver_id.eq.${vidEnc})&order=created_at.desc&limit=50`).catch(() => []),
             supaFetch('shavlo_blocks', 'GET', `?select=id,blocker_id,blocked_id,created_at&or=(blocker_id.eq.${vidEnc},blocked_id.eq.${vidEnc})`).catch(() => []),
             fetchUsers ? supaFetch('shavlo_sessions', 'GET', `?select=id,vault_id,device_name,last_active&vault_id=eq.${vidEnc}&order=last_active.desc&limit=10`).catch(() => null) : Promise.resolve(null),
@@ -3165,6 +3102,21 @@
               .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
                 handleWebRtcSignal(payload);
               })
+              .on('broadcast', { event: 'status_seen_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.id || !payload.viewerId || payload.viewerId === activeVaultId) return;
+                  const net = getNetwork();
+                  const st = (net.statuses || []).find(x => x.id === payload.id);
+                  if (st) {
+                    st.seenBy = st.seenBy || [];
+                    st.seenNames = st.seenNames || {};
+                    if (!st.seenBy.includes(payload.viewerId)) st.seenBy.push(payload.viewerId);
+                    if (payload.viewerName) st.seenNames[payload.viewerId] = payload.viewerName;
+                    saveNetwork(net, 'status_seen_rt');
+                    if (ui.modal === 'statusViewer') renderStatusViewer();
+                  }
+                } catch (_) {}
+              })
               .on('broadcast', { event: 'walkie_state' }, ({ payload }) => {
                 if (!payload || payload.fromId === activeVaultId || !payload.roomId) return;
                 if (payload.active) {
@@ -3554,28 +3506,54 @@
 
         const ae = document.activeElement;
         const isTyping = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
-        const isMobileChatOpen = (window.innerWidth < 768 && state.mobileView === 'chat');
-        if (state.activeNav === 'messages' && isMobileChatOpen && !ui.activeCall && !ui.modal && (!isTyping || ae.id === 'message-input')) {
-          const feed = document.getElementById('message-feed');
-          const chat = getSelectedChat();
-          if (feed && chat && !(ui.privateChatMode && ui.privateChatMode[chat.id])) {
-            const activeMessages = chat.messages || [];
-            const rawFilteredMsgs = ui.inChatSearchQuery
-              ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase()))
-              : activeMessages;
-            const filteredMsgs = (!ui.inChatSearchQuery && rawFilteredMsgs.length > 60) ? rawFilteredMsgs.slice(-60) : rawFilteredMsgs;
-            const wasNear = isNearChatBottom();
-            const hdrNameEl = document.getElementById('active-chat-name');
-            if (hdrNameEl && hdrNameEl.textContent !== chat.name) hdrNameEl.textContent = chat.name;
-            const hdrAvEl = document.getElementById('active-chat-avatar');
-            if (hdrAvEl && hdrAvEl.getAttribute('data-av-url') !== (chat.avatarUrl || '')) {
-              hdrAvEl.setAttribute('data-av-url', chat.avatarUrl || '');
-              hdrAvEl.innerHTML = renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', 'bg-ink dark:bg-white text-white dark:text-ink');
+        if (state.activeNav === 'messages' && !ui.activeCall && !ui.modal && (!isTyping || ae.id === 'message-input')) {
+          const isDesktop = window.innerWidth >= 768;
+          const isChatView = isDesktop || state.mobileView === 'chat';
+          let patchedAny = false;
+          if (isChatView) {
+            const feed = document.getElementById('message-feed');
+            const chat = getSelectedChat();
+            if (feed && chat && !(ui.privateChatMode && ui.privateChatMode[chat.id])) {
+              const activeMessages = chat.messages || [];
+              const rawFilteredMsgs = ui.inChatSearchQuery
+                ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase()))
+                : activeMessages;
+              const filteredMsgs = (!ui.inChatSearchQuery && rawFilteredMsgs.length > 60) ? rawFilteredMsgs.slice(-60) : rawFilteredMsgs;
+              const wasNear = isNearChatBottom();
+              const hdrNameEl = document.getElementById('active-chat-name');
+              if (hdrNameEl && hdrNameEl.textContent !== chat.name) hdrNameEl.textContent = chat.name;
+              const hdrAvEl = document.getElementById('active-chat-avatar');
+              if (hdrAvEl && hdrAvEl.getAttribute('data-av-url') !== (chat.avatarUrl || '')) {
+                hdrAvEl.setAttribute('data-av-url', chat.avatarUrl || '');
+                hdrAvEl.innerHTML = renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', 'bg-ink dark:bg-white text-white dark:text-ink');
+              }
+              patchMessageFeedInPlace(feed, chat, filteredMsgs);
+              if (wasNear) scrollToBottom();
+              patchedAny = true;
             }
-            patchMessageFeedInPlace(feed, chat, filteredMsgs);
-            if (wasNear) scrollToBottom();
-            return;
           }
+          if (isDesktop || state.mobileView === 'list') {
+            const listEl = document.getElementById('chats-scroll');
+            if (listEl) {
+              const tmp = document.createElement('div');
+              tmp.innerHTML = renderMessagesTab();
+              const nextList = tmp.querySelector('#chats-scroll');
+              if (nextList && listEl.innerHTML !== nextList.innerHTML) {
+                const prevTop = listEl.scrollTop;
+                listEl.innerHTML = nextList.innerHTML;
+                listEl.scrollTop = prevTop;
+              }
+              const curBar = document.getElementById('mobile-dock-wrap');
+              if (curBar) {
+                const tmpBar = document.createElement('div');
+                tmpBar.innerHTML = renderMobileBottomBar();
+                const nextBar = tmpBar.firstElementChild;
+                if (nextBar && curBar.innerHTML !== nextBar.innerHTML) curBar.innerHTML = nextBar.innerHTML;
+              }
+              patchedAny = true;
+            }
+          }
+          if (patchedAny) return;
         }
         if (ae && ae.id === 'message-input') return;
         const wasNearBeforeRender = isNearChatBottom();
@@ -4388,12 +4366,8 @@
           if (!net.friendships.some(f => f.users.includes(req.fromId) && f.users.includes(req.toId))) {
             net.friendships.push({ id: frId, users: [req.fromId, req.toId], since: sinceTxt });
           }
-          supaFetch('rpc/shavlo_accept_friend_request', 'POST', '', {
-            req_id: req.id, f_id: frId, user_a_id: req.fromId, user_b_id: req.toId, since_txt: sinceTxt
-          }).catch(() => {
-            supaWriteReliable('shavlo_friendships', 'POST', '', { id: frId, user_a: req.fromId, user_b: req.toId, since: sinceTxt });
-            supaWriteReliable('shavlo_requests', 'DELETE', `?id=eq.${encodeURIComponent(req.id)}`, null);
-          });
+          supaWriteReliable('shavlo_friendships', 'POST', '', { id: frId, user_a: req.fromId, user_b: req.toId, since: sinceTxt });
+          supaWriteReliable('shavlo_requests', 'DELETE', `?id=eq.${encodeURIComponent(req.id)}`, null);
           const roomId = makeRoomId(req.fromId, req.toId);
           if (!net.peerChats[roomId]) {
             const welcomeMsg = {
@@ -6324,7 +6298,6 @@
                         <div class="${myStatuses.length > 0 ? 'status-ring-active' : ''} rounded-full">
                           ${renderAvatar(getInitial(state.userProfile.name), state.userProfile.avatarUrl, 'w-14 h-14 text-[17px] font-bold', 'bg-brand-50 dark:bg-zinc-800 text-brand-600 dark:text-brand-100')}
                         </div>
-                        <span class="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-extrabold flex items-center justify-center border-2 border-white dark:border-[#0B0B0D]">+</span>
                       </div>
                       <div class="min-w-0">
                         <div class="title-display text-[16px] font-bold tracking-[-0.02em] text-ink dark:text-white">${myStatuses.length > 0 ? 'My status' : 'Add status'}</div>
@@ -6818,8 +6791,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       </div>
                     `;
                   })()}
-                  <div id="composer-pill" class="${isPrivateMode ? 'glass-dark-pill' : 'soft-bw-glass'} ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 min-h-[48px] rounded-[24px] pl-4 pr-1.5 py-1.5 flex items-center gap-1.5">
-                    <textarea id="message-input" rows="1" enterkeyhint="send" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" style="max-height:112px;" class="w-full min-w-0 py-1.5 bg-transparent text-[15.5px] leading-[1.35] font-medium tracking-[-0.015em] resize-none overflow-y-auto ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none">${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}</textarea>
+                  <div id="composer-pill" class="${isPrivateMode ? 'glass-dark-pill' : 'soft-bw-glass'} ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5">
+                    <input id="message-input" type="text" enterkeyhint="send" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none" />
                     <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isPrivateMode ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-ink/70 dark:text-white/75 hover:text-ink dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'} transition">
                       ${icon('camera', 'w-[20px] h-[20px]')}
                     </button>
@@ -6879,45 +6852,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         `;
       }
 
-      function generateTinyBlurThumb(dataUrl) {
-        return compressImageDataUrl(dataUrl, 16, 0.45);
-      }
-
-      async function compressImageDataUrl(dataUrl, maxDim, quality) {
-        const lim = maxDim || 960;
-        const q = quality || 0.78;
-        // OffscreenCanvas + WebP path (strips all EXIF/GPS metadata & keeps UI smooth)
-        if (typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function' && typeof fetch === 'function') {
-          try {
-            const res = await fetch(dataUrl);
-            const srcBlob = await res.blob();
-            const bmp = await createImageBitmap(srcBlob);
-            const scale = Math.min(1, lim / Math.max(bmp.width || 1, bmp.height || 1));
-            const w = Math.max(1, Math.round(bmp.width * scale));
-            const h = Math.max(1, Math.round(bmp.height * scale));
-            const oc = new OffscreenCanvas(w, h);
-            const octx = oc.getContext('2d');
-            octx.imageSmoothingEnabled = true;
-            octx.imageSmoothingQuality = 'high';
-            octx.drawImage(bmp, 0, 0, w, h);
-            bmp.close();
-            let outBlob = await oc.convertToBlob({ type: 'image/webp', quality: q }).catch(() => null);
-            if (!outBlob || outBlob.type !== 'image/webp') {
-              outBlob = await oc.convertToBlob({ type: 'image/jpeg', quality: q });
-            }
-            return await new Promise((r) => {
-              const fr = new FileReader();
-              fr.onload = () => r(typeof fr.result === 'string' ? fr.result : dataUrl);
-              fr.onerror = () => r(dataUrl);
-              fr.readAsDataURL(outBlob);
-            });
-          } catch (_) {}
-        }
+      function compressImageDataUrl(dataUrl, maxDim, quality) {
         return new Promise((resolve) => {
           try {
             const img = new Image();
             img.onload = () => {
               try {
+                const lim = maxDim || 960;
                 const scale = Math.min(1, lim / Math.max(img.width || 1, img.height || 1));
                 const w = Math.max(1, Math.round(img.width * scale));
                 const h = Math.max(1, Math.round(img.height * scale));
@@ -6928,8 +6869,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, 0, 0, w, h);
-                const webp = canvas.toDataURL('image/webp', q);
-                resolve(webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', q));
+                resolve(canvas.toDataURL('image/jpeg', quality || 0.78));
               } catch (e) { resolve(dataUrl); }
             };
             img.onerror = () => resolve(dataUrl);
@@ -8069,7 +8009,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
             <div class="flex flex-col items-center">
               <div class="w-full max-w-[300px] aspect-square rounded-3xl overflow-hidden bg-zinc-950 border border-black/10 dark:border-white/15 shadow-xl">
-                <img src="${safeImgUrl(chat.avatarUrl)}" alt="${escapeHtml(chat.name)}" class="w-full h-full object-cover aspect-[4/3] bg-black/5 dark:bg-white/5" loading="lazy" decoding="async />
+                <img src="${safeImgUrl(chat.avatarUrl)}" alt="${escapeHtml(chat.name)}" class="w-full h-full object-cover />
               </div>
               <button type="button" data-action="back-to-contact-menu" class="mt-4 w-full h-10 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold hover:opacity-85 transition">
                 Back to Contact
@@ -8772,7 +8712,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
             <div class="flex justify-center py-3">
               <div id="crop-stage" style="touch-action:none;" class="relative w-[240px] h-[240px] rounded-full overflow-hidden bg-zinc-950 ring-2 ring-ink/20 dark:ring-white/25 cursor-grab active:cursor-grabbing select-none shadow-lg">
-                <img id="crop-preview-img" src="${safeImgUrl(ca.src)}" alt="Crop preview" draggable="false" style="width:${baseW}px; height:${baseH}px; max-width:none; left:50%; top:50%; transform:translate(calc(-50% + ${ca.x}px), calc(-50% + ${ca.y}px)) scale(${ca.zoom}) rotate(${ca.rotate}deg); transform-origin:center center;" class="absolute pointer-events-none select-none aspect-[4/3] bg-black/5 dark:bg-white/5" loading="lazy" decoding="async />
+                <img id="crop-preview-img" src="${safeImgUrl(ca.src)}" alt="Crop preview" draggable="false" style="width:${baseW}px; height:${baseH}px; max-width:none; left:50%; top:50%; transform:translate(calc(-50% + ${ca.x}px), calc(-50% + ${ca.y}px)) scale(${ca.zoom}) rotate(${ca.rotate}deg); transform-origin:center center;" class="absolute pointer-events-none select-none />
                 <div class="pointer-events-none absolute inset-0 rounded-full ring-1 ring-inset ring-white/35"></div>
               </div>
             </div>
@@ -9113,25 +9053,29 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </div>
             </div>
 
-            <!-- Tap Left / Right Navigation Zones -->
+            <!-- Tap Left (Previous) / Right (Next) Screen Zones -->
             <div class="relative z-10 flex-1 flex items-center justify-center my-6">
-              <button data-action="nav-status" data-dir="-1" aria-label="Previous status" class="absolute inset-y-0 left-0 w-1/3 cursor-pointer"></button>
-              <button data-action="nav-status" data-dir="1" aria-label="Next status" class="absolute inset-y-0 right-0 w-2/3 cursor-pointer"></button>
+              <button type="button" data-action="nav-status" data-dir="-1" aria-label="Previous status" class="absolute inset-y-0 left-0 w-1/2 cursor-pointer"></button>
+              <button type="button" data-action="nav-status" data-dir="1" aria-label="Next status" class="absolute inset-y-0 right-0 w-1/2 cursor-pointer"></button>
               <p class="title-display text-[22px] font-bold leading-snug text-center px-3 pointer-events-none">${escapeHtml(st.text)}</p>
             </div>
 
-            <!-- Viewer List (for your own status) + Bottom Controls -->
+            <!-- Eye Seen Button (own status) + Reaction Pills -->
             ${isMine ? (() => {
               const netDir = getNetwork().directory || {};
               const viewers = (st.seenBy || []).filter(vid => vid && vid !== activeVaultId).map(vid => (st.seenNames && st.seenNames[vid]) || (netDir[vid] && netDir[vid].name) || 'Contact');
-              return `<div class="relative z-20 mb-2.5 flex justify-center"><span class="px-3.5 py-1.5 rounded-full bg-black/45 backdrop-blur-md text-[12px] font-semibold text-white/95 inline-flex items-center gap-1.5"><span>👁 ${viewers.length}</span><span>${viewers.length ? ('Seen by ' + escapeHtml(viewers.join(', '))) : 'No views yet'}</span></span></div>`;
+              return `
+                <div class="relative z-20 mb-2 flex flex-col items-center gap-1.5">
+                  ${ui.statusViewersOpen && viewers.length ? `<div class="px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md text-[12px] font-medium text-white/95">${escapeHtml(viewers.join(', '))}</div>` : ''}
+                  <button type="button" data-action="toggle-status-viewers" title="Seen" class="px-3.5 py-1.5 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-[13px] font-semibold text-white inline-flex items-center gap-1.5 transition">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="tabular-nums">${viewers.length}</span>
+                  </button>
+                </div>
+              `;
             })() : ''}
-            <div class="relative z-20 flex items-center justify-between gap-2">
-              <button data-action="nav-status" data-dir="-1" class="px-3.5 py-1.5 rounded-full bg-black/35 hover:bg-black/55 text-[12px] font-semibold ${idx === 0 ? 'opacity-30 pointer-events-none' : ''}">Prev</button>
-              <div class="flex items-center gap-2">
-                ${['❤️', '🔥', '😂'].map(em => `<button data-action="reply-status" data-id="${st.id}" data-emoji="${em}" class="w-9 h-9 rounded-full bg-black/35 hover:bg-black/60 text-[16px] flex items-center justify-center">${em}</button>`).join('')}
-              </div>
-              <button data-action="nav-status" data-dir="1" class="px-3.5 py-1.5 rounded-full bg-black/35 hover:bg-black/55 text-[12px] font-semibold">${idx >= list.length - 1 ? 'Done' : 'Next'}</button>
+            <div class="relative z-20 flex items-center justify-center gap-2.5">
+              ${['❤️', '🔥', '😂'].map(em => `<button type="button" data-action="reply-status" data-id="${st.id}" data-emoji="${em}" class="w-10 h-10 rounded-full bg-black/35 hover:bg-black/60 backdrop-blur-md text-[17px] flex items-center justify-center transition">${em}</button>`).join('')}
             </div>
           </div>
         `;
@@ -9154,6 +9098,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           }
           if (changed) {
             saveNetwork(net, 'status_seen');
+            if (supaRealtimeChan) {
+              try { supaRealtimeChan.send({ type: 'broadcast', event: 'status_seen_fast', payload: { id: liveSt.id, viewerId: activeVaultId, viewerName: state && state.userProfile ? state.userProfile.name : '' } }); } catch (_) {}
+            }
             supaWriteReliable('shavlo_statuses', 'PATCH', `?id=eq.${encodeURIComponent(liveSt.id)}`, { payload: liveSt });
           }
         } else if (state) {
@@ -10417,6 +10364,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.activeStatusId = stId;
           markStatusSeen(stId);
           renderStatusViewer();
+        } else if (action === 'toggle-status-viewers') {
+          ui.statusViewersOpen = !ui.statusViewersOpen;
+          renderStatusViewer();
         } else if (action === 'close-status' || (action === 'close-status-backdrop' && e.target === btn)) {
           clearTimeout(statusAutoTimer);
           ui.activeStatusId = null;
@@ -11137,7 +11087,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           processChatMediaFile(e.target.files[0], (dataUrl) => {
             ui.statusDraftPhoto = dataUrl;
             renderModal();
-          }, 1920);
+          }, 2048, 0.94);
         } else if (e.target && e.target.id === 'friend-qr-file-input' && e.target.files && e.target.files[0]) {
           const qrFile = e.target.files[0];
           e.target.value = '';
