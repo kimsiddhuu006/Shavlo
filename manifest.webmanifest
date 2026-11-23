@@ -1,21 +1,34 @@
 {
-  "id": "./",
+  "id": "/",
   "name": "shavlo",
   "short_name": "shavlo",
+  "description": "Private, encrypted messaging, audio/video calls, and instant UPI.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#FAFAFC",
   "theme_color": "#09090C",
-  "prefer_related_applications": false,
-  "description": "Private chat, WebRTC calls, and UPI payments.",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%2309090C'/%3E%3Ccircle cx='256' cy='256' r='132' fill='none' stroke='%23C6A76D' stroke-width='28'/%3E%3Ccircle cx='256' cy='256' r='44' fill='%23FFFFFF'/%3E%3C/svg%3E",
-      "sizes": "512x512",
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='44' fill='%2309090C'/%3E%3Ctext x='96' y='122' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='800' font-size='88' fill='%23FAFAFC'%3Es%3C/text%3E%3Ccircle cx='144' cy='124' r='11' fill='%23C6A76D'/%3E%3C/svg%3E",
+      "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Chat",
+      "short_name": "New Chat",
+      "description": "Add a friend or start a private chat",
+      "url": "./?shortcut=new-chat"
+    },
+    {
+      "name": "Scan QR",
+      "short_name": "Scan QR",
+      "description": "Scan a friend or UPI QR code",
+      "url": "./?shortcut=scan-qr"
     }
   ]
 }

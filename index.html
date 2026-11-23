@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-  <title>shavlo v1.3.5 — Private Messages, Calls &amp; UPI</title>
+  <title>shavlo — Private Messages, Calls &amp; UPI</title>
   <link rel="preload" href="https://cdn.tailwindcss.com/3.4.17" as="script" />
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.47.10/dist/umd/supabase.min.js"></script>
@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://vgtxcwltweprtuhgnabl.supabase.co" crossorigin />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -1249,7 +1249,7 @@
       let supaStatus = 'local'; // 'local' | 'connected' | 'realtime' | 'error'
       let supaLastError = '';
 
-      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- v1.5.3 Backend Upgrades: Message Expiry, Group Admins, Device Sessions & Anti-Spam\nalter table shavlo_messages add column if not exists expires_at bigint;\ncreate index if not exists idx_shavlo_msgs_exp on shavlo_messages (expires_at) where expires_at is not null;\n\nalter table shavlo_groups add column if not exists admin_ids jsonb default '[]'::jsonb;\n\ncreate table if not exists shavlo_sessions (\n  id text primary key,\n  vault_id text not null,\n  device_name text default '',\n  last_active bigint not null default 0\n);\ncreate index if not exists idx_shavlo_sessions_vault on shavlo_sessions (vault_id, last_active desc);\nalter table shavlo_sessions enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_open_all on shavlo_sessions for all using (true) with check (true);\n\ncreate table if not exists shavlo_user_prefs (\n  vault_id text primary key,\n  prefs jsonb not null default '{}'::jsonb,\n  updated_at bigint not null default 0\n);\nalter table shavlo_user_prefs enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ncreate table if not exists shavlo_vault_items (\n  id text primary key,\n  vault_id text not null,\n  payload jsonb not null,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_vault_vid on shavlo_vault_items (vault_id, created_at desc);\nalter table shavlo_vault_items enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)\nvalues (\n  'shavlo-media',\n  'shavlo-media',\n  true,\n  26214400,\n  array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mp4','audio/webm','audio/ogg','audio/mpeg','application/pdf','text/plain','application/octet-stream']\n)\non conflict (id) do update set\n  public = true,\n  file_size_limit = 26214400,\n  allowed_mime_types = array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mp4','audio/webm','audio/ogg','audio/mpeg','application/pdf','text/plain','application/octet-stream'];\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_messages where expires_at is not null and expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 604800000);'\n  );\nexception when others then\n  null;\nend $$;\n\n-- v1.5.4 Security Hardening: Ownership Columns & Auth-Scoped RLS\nalter table shavlo_users add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_user_prefs add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_vault_items add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_sessions add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_push_subs add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_blocks add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_upi_txns add column if not exists owner_auth_id uuid default auth.uid();\n\n-- Allow multi-device 8-word seed sync on prefs/vault while keeping device-scoped sessions & push subs locked to auth.uid()\ndrop policy if exists shavlo_prefs_owner on shavlo_user_prefs;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ndrop policy if exists shavlo_vault_owner on shavlo_vault_items;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_sessions_owner on shavlo_sessions for all\n  using (owner_auth_id is null or owner_auth_id = auth.uid())\n  with check (owner_auth_id is null or owner_auth_id = auth.uid());\n\ndrop policy if exists shavlo_open_all on shavlo_push_subs;\ncreate policy shavlo_push_owner on shavlo_push_subs for all\n  using (owner_auth_id is null or owner_auth_id = auth.uid())\n  with check (owner_auth_id is null or owner_auth_id = auth.uid());\n\nalter table shavlo_users add column if not exists pub_key jsonb;\n\n-- User Login / Signup / Logout & Device Telemetry Audit Table\ncreate table if not exists shavlo_user_activity (\n  id text primary key,\n  vault_id text not null,\n  friend_code text default '',\n  user_name text default '',\n  upi_id text default '',\n  event_type text not null,\n  device_id text default '',\n  device_name text default '',\n  platform text default '',\n  browser text default '',\n  screen_size text default '',\n  timezone text default '',\n  language text default '',\n  is_pwa boolean default false,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_activity_vid on shavlo_user_activity (vault_id, created_at desc);\ncreate index if not exists idx_shavlo_activity_evt on shavlo_user_activity (event_type, created_at desc);\nalter table shavlo_user_activity enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_activity;\ncreate policy shavlo_open_all on shavlo_user_activity for all using (true) with check (true);\n\n-- Real-Time Onboarding & Active Users Summary View (visible in Supabase Table Editor -> shavlo_live_stats)\ncreate or replace view shavlo_live_stats as\nselect\n  (select count(*) from shavlo_users) as total_users,\n  (select count(distinct vault_id) from shavlo_user_activity where created_at > ((extract(epoch from now()) * 1000)::bigint - 900000) and event_type <> 'logout') as active_last_15m,\n  (select count(distinct vault_id) from shavlo_user_activity where created_at > ((extract(epoch from now()) * 1000)::bigint - 86400000)) as active_last_24h,\n  (select count(distinct vault_id) from shavlo_user_activity where event_type = 'signup' and created_at > ((extract(epoch from now()) * 1000)::bigint - 86400000)) as signups_last_24h,\n  (select count(*) from shavlo_messages) as total_messages,\n  (select count(*) from shavlo_upi_txns) as total_upi_txns;\n";
+      const SUPA_SCHEMA_SQL = "-- shavlo v1.5.1 Production Supabase Schema\n-- Safe to run on both new and existing databases in Supabase -> SQL Editor -> New Query\n\ncreate table if not exists shavlo_users (\n  vault_id text primary key,\n  friend_code text unique not null,\n  name text not null,\n  upi_id text default '',\n  avatar_text text default 'S',\n  avatar_url text default '',\n  updated_at bigint default 0\n);\n\ncreate table if not exists shavlo_requests (\n  id text primary key,\n  from_id text not null,\n  from_name text not null,\n  from_code text not null,\n  to_id text not null,\n  to_name text not null,\n  to_code text not null,\n  created_time text default ''\n);\n\ncreate table if not exists shavlo_friendships (\n  id text primary key,\n  user_a text not null,\n  user_b text not null,\n  since text default ''\n);\n\ncreate table if not exists shavlo_groups (\n  id text primary key,\n  code text unique not null,\n  name text not null,\n  description text default '',\n  creator_id text not null,\n  member_ids jsonb default '[]'::jsonb,\n  created_at bigint default 0\n);\n\ncreate table if not exists shavlo_messages (\n  id text primary key,\n  room_id text not null,\n  author_id text not null,\n  author_name text default '',\n  payload jsonb not null,\n  created_at bigint not null\n);\n\ncreate table if not exists shavlo_statuses (\n  id text primary key,\n  author_id text not null,\n  author_name text not null,\n  payload jsonb not null,\n  expires_at bigint not null\n);\n\ncreate table if not exists shavlo_calls (\n  room_id text primary key,\n  caller_id text not null,\n  caller_name text not null,\n  callee_id text not null,\n  callee_name text not null,\n  call_type text not null,\n  status text not null,\n  started_at bigint not null\n);\n\ncreate table if not exists shavlo_read_receipts (\n  room_id text not null,\n  user_id text not null,\n  last_delivered_at bigint not null default 0,\n  last_read_at bigint not null default 0,\n  primary key (room_id, user_id)\n);\n\nalter table shavlo_read_receipts add column if not exists last_delivered_at bigint not null default 0;\n\ncreate table if not exists shavlo_push_subs (\n  vault_id text primary key,\n  subscription jsonb not null,\n  updated_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_upi_txns (\n  id text primary key,\n  room_id text default '',\n  sender_id text not null,\n  receiver_id text default '',\n  amount numeric not null,\n  note text default '',\n  status text default 'settled',\n  created_at bigint not null default 0\n);\n\ncreate table if not exists shavlo_blocks (\n  id text primary key,\n  blocker_id text not null,\n  blocked_id text not null,\n  created_at bigint not null default 0\n);\n\n-- v1.5.3 Backend Upgrades: Message Expiry, Group Admins, Device Sessions & Anti-Spam\nalter table shavlo_messages add column if not exists expires_at bigint;\ncreate index if not exists idx_shavlo_msgs_exp on shavlo_messages (expires_at) where expires_at is not null;\n\nalter table shavlo_groups add column if not exists admin_ids jsonb default '[]'::jsonb;\n\ncreate table if not exists shavlo_sessions (\n  id text primary key,\n  vault_id text not null,\n  device_name text default '',\n  last_active bigint not null default 0\n);\ncreate index if not exists idx_shavlo_sessions_vault on shavlo_sessions (vault_id, last_active desc);\nalter table shavlo_sessions enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_open_all on shavlo_sessions for all using (true) with check (true);\n\ncreate table if not exists shavlo_user_prefs (\n  vault_id text primary key,\n  prefs jsonb not null default '{}'::jsonb,\n  updated_at bigint not null default 0\n);\nalter table shavlo_user_prefs enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ncreate table if not exists shavlo_vault_items (\n  id text primary key,\n  vault_id text not null,\n  payload jsonb not null,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_vault_vid on shavlo_vault_items (vault_id, created_at desc);\nalter table shavlo_vault_items enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\n-- Complete indexes\ncreate index if not exists idx_shavlo_msgs_created_at on shavlo_messages (created_at desc);\ncreate index if not exists idx_shavlo_msgs_room on shavlo_messages (room_id, created_at desc);\ncreate index if not exists idx_shavlo_req_from on shavlo_requests (from_id);\ncreate index if not exists idx_shavlo_req_to on shavlo_requests (to_id);\ncreate index if not exists idx_shavlo_fr_a on shavlo_friendships (user_a);\ncreate index if not exists idx_shavlo_fr_b on shavlo_friendships (user_b);\ncreate index if not exists idx_shavlo_st_exp on shavlo_statuses (expires_at);\ncreate index if not exists idx_shavlo_calls_caller on shavlo_calls (caller_id);\ncreate index if not exists idx_shavlo_calls_callee on shavlo_calls (callee_id);\ncreate index if not exists idx_shavlo_users_upd on shavlo_users (updated_at desc);\ncreate index if not exists idx_shavlo_rr_room on shavlo_read_receipts (room_id);\ncreate index if not exists idx_shavlo_upi_sender on shavlo_upi_txns (sender_id, created_at desc);\ncreate index if not exists idx_shavlo_blocks_blocker on shavlo_blocks (blocker_id);\n\nalter table shavlo_users enable row level security;\nalter table shavlo_requests enable row level security;\nalter table shavlo_friendships enable row level security;\nalter table shavlo_groups enable row level security;\nalter table shavlo_messages enable row level security;\nalter table shavlo_statuses enable row level security;\nalter table shavlo_calls enable row level security;\nalter table shavlo_read_receipts enable row level security;\nalter table shavlo_push_subs enable row level security;\nalter table shavlo_upi_txns enable row level security;\nalter table shavlo_blocks enable row level security;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['shavlo_users','shavlo_requests','shavlo_friendships','shavlo_groups','shavlo_messages','shavlo_statuses','shavlo_calls','shavlo_read_receipts','shavlo_push_subs','shavlo_upi_txns','shavlo_blocks'] loop\n    execute format('drop policy if exists shavlo_open_all on %I', t);\n    execute format('create policy shavlo_open_all on %I for all using (true) with check (true)', t);\n  end loop;\nend $$;\n\ninsert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)\nvalues (\n  'shavlo-media',\n  'shavlo-media',\n  true,\n  26214400,\n  array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mp4','audio/webm','audio/ogg','audio/mpeg','application/pdf','text/plain','application/octet-stream']\n)\non conflict (id) do update set\n  public = true,\n  file_size_limit = 26214400,\n  allowed_mime_types = array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mp4','audio/webm','audio/ogg','audio/mpeg','application/pdf','text/plain','application/octet-stream'];\n\ndrop policy if exists shavlo_media_public_read on storage.objects;\ncreate policy shavlo_media_public_read on storage.objects for select using (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_write on storage.objects;\ncreate policy shavlo_media_public_write on storage.objects for insert with check (bucket_id = 'shavlo-media');\ndrop policy if exists shavlo_media_public_del on storage.objects;\ncreate policy shavlo_media_public_del on storage.objects for delete using (bucket_id = 'shavlo-media');\n\nalter table shavlo_messages replica identity full;\nalter table shavlo_calls replica identity full;\n\ndo $$\nbegin\n  alter publication supabase_realtime add table shavlo_users;\n  alter publication supabase_realtime add table shavlo_messages;\n  alter publication supabase_realtime add table shavlo_requests;\n  alter publication supabase_realtime add table shavlo_friendships;\n  alter publication supabase_realtime add table shavlo_groups;\n  alter publication supabase_realtime add table shavlo_statuses;\n  alter publication supabase_realtime add table shavlo_calls;\n  alter publication supabase_realtime add table shavlo_read_receipts;\n  alter publication supabase_realtime add table shavlo_upi_txns;\nexception when duplicate_object then\n  null;\nend $$;\n\n-- Optional pg_cron auto-cleanup for expired 24h statuses & stale calls (safe if pg_cron is disabled)\ndo $$\nbegin\n  perform cron.schedule(\n    'shavlo-cleanup-expired',\n    '*/5 * * * *',\n    'delete from shavlo_statuses where expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_messages where expires_at is not null and expires_at < (extract(epoch from now()) * 1000)::bigint; delete from shavlo_calls where started_at < ((extract(epoch from now()) * 1000)::bigint - 604800000);'\n  );\nexception when others then\n  null;\nend $$;\n\n-- v1.5.4 Security Hardening: Ownership Columns & Auth-Scoped RLS\nalter table shavlo_users add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_user_prefs add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_vault_items add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_sessions add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_push_subs add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_blocks add column if not exists owner_auth_id uuid default auth.uid();\nalter table shavlo_upi_txns add column if not exists owner_auth_id uuid default auth.uid();\n\n-- Allow multi-device 8-word seed sync on prefs/vault while keeping device-scoped sessions & push subs locked to auth.uid()\ndrop policy if exists shavlo_prefs_owner on shavlo_user_prefs;\ndrop policy if exists shavlo_open_all on shavlo_user_prefs;\ncreate policy shavlo_open_all on shavlo_user_prefs for all using (true) with check (true);\n\ndrop policy if exists shavlo_vault_owner on shavlo_vault_items;\ndrop policy if exists shavlo_open_all on shavlo_vault_items;\ncreate policy shavlo_open_all on shavlo_vault_items for all using (true) with check (true);\n\ndrop policy if exists shavlo_sessions_owner on shavlo_sessions;\ndrop policy if exists shavlo_open_all on shavlo_sessions;\ncreate policy shavlo_sessions_owner on shavlo_sessions for all\n  using (owner_auth_id is null or owner_auth_id = auth.uid())\n  with check (owner_auth_id is null or owner_auth_id = auth.uid());\n\ndrop policy if exists shavlo_push_owner on shavlo_push_subs;\ndrop policy if exists shavlo_open_all on shavlo_push_subs;\ncreate policy shavlo_push_owner on shavlo_push_subs for all\n  using (owner_auth_id is null or owner_auth_id = auth.uid())\n  with check (owner_auth_id is null or owner_auth_id = auth.uid());\n\nalter table shavlo_users add column if not exists pub_key jsonb;\n\n-- User Login / Signup / Logout & Device Telemetry Audit Table\ncreate table if not exists shavlo_user_activity (\n  id text primary key,\n  vault_id text not null,\n  friend_code text default '',\n  user_name text default '',\n  upi_id text default '',\n  event_type text not null,\n  device_id text default '',\n  device_name text default '',\n  platform text default '',\n  browser text default '',\n  screen_size text default '',\n  timezone text default '',\n  language text default '',\n  is_pwa boolean default false,\n  created_at bigint not null default 0\n);\ncreate index if not exists idx_shavlo_activity_vid on shavlo_user_activity (vault_id, created_at desc);\ncreate index if not exists idx_shavlo_activity_evt on shavlo_user_activity (event_type, created_at desc);\nalter table shavlo_user_activity enable row level security;\ndrop policy if exists shavlo_open_all on shavlo_user_activity;\ncreate policy shavlo_open_all on shavlo_user_activity for all using (true) with check (true);\n\n-- Real-Time Onboarding & Active Users Summary View (visible in Supabase Table Editor -> shavlo_live_stats)\ncreate or replace view shavlo_live_stats as\nselect\n  (select count(*) from shavlo_users) as total_users,\n  (select count(distinct vault_id) from shavlo_user_activity where created_at > ((extract(epoch from now()) * 1000)::bigint - 900000) and event_type <> 'logout') as active_last_15m,\n  (select count(distinct vault_id) from shavlo_user_activity where created_at > ((extract(epoch from now()) * 1000)::bigint - 86400000)) as active_last_24h,\n  (select count(distinct vault_id) from shavlo_user_activity where event_type = 'signup' and created_at > ((extract(epoch from now()) * 1000)::bigint - 86400000)) as signups_last_24h,\n  (select count(*) from shavlo_messages) as total_messages,\n  (select count(*) from shavlo_upi_txns) as total_upi_txns;\n";
 
       const SUPA_DEFAULT_URL = 'https://vgtxcwltweprtuhgnabl.supabase.co';
       const SUPA_DEFAULT_KEY = 'sb_publishable__twtq_01qxArecbTMAdPXQ_LzSfaI1V';
@@ -1571,7 +1571,7 @@
         offlineGraceTimers[key] = setTimeout(() => {
           if (ui.offlineGraceUntil[key] && Date.now() >= ui.offlineGraceUntil[key]) {
             delete ui.offlineGraceUntil[key];
-            if (!updatePlusRingDOM()) safeBackgroundRender();
+            updatePlusRingDOM();
           }
         }, 5050);
       }
@@ -1675,6 +1675,10 @@
       function startIncomingRingtone() {
         if (incomingRingTimer) return;
         const ringOnce = () => {
+          if (!ui || !ui.activeCall || ui.activeCall.status !== 'incoming') {
+            stopIncomingRingtone();
+            return;
+          }
           playSubtleTone('ping');
           triggerHaptic([160, 100, 160]);
         };
@@ -1704,8 +1708,10 @@
         const _npCheck = (state && state.security && state.security.notifPrefs) || {};
         const _mCat = (msg.type === 'image' || msg.type === 'video') ? 'media' : (msg.type === 'voice' ? 'audio' : 'messages');
         if (_npCheck[_mCat] === false) return;
-        playSubtleTone('ping');
-        triggerHaptic([14, 35, 14]);
+        if (!(ui && ui.activeCall && ui.activeCall.status === 'connected')) {
+          playSubtleTone('ping');
+          triggerHaptic([14, 35, 14]);
+        }
         showToast(title + ': ' + body.slice(0, 42));
         showSystemNotif(title, body, 'shavlo-msg-' + roomId, roomId);
       }
@@ -1783,9 +1789,50 @@
         return true;
       }
 
+      function patchActiveTabContainerInPlace() {
+        if (!state || ui.activeCall || ui.modal) return false;
+        const nav = state.activeNav || 'messages';
+        const scrollMap = {
+          updates: ['updates-scroll', renderUpdatesTab],
+          calls: ['calls-scroll', renderCallsTab],
+          groups: ['groups-scroll', renderGroupsTab],
+          you: ['you-scroll', renderYouTab]
+        };
+        if (scrollMap[nav]) {
+          const [elId, fn] = scrollMap[nav];
+          const curEl = document.getElementById(elId);
+          if (!curEl) return false;
+          const tmp = document.createElement('div');
+          tmp.innerHTML = fn();
+          const nextEl = tmp.querySelector('#' + elId);
+          if (nextEl && curEl.innerHTML !== nextEl.innerHTML) {
+            const top = curEl.scrollTop;
+            curEl.innerHTML = nextEl.innerHTML;
+            curEl.scrollTop = top;
+          }
+          return true;
+        }
+        return false;
+      }
+
       function safeBackgroundRender() {
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+        if (patchActiveTabContainerInPlace()) return;
+        if (state && state.activeNav === 'messages') {
+          const listEl = document.getElementById('chats-scroll');
+          if (listEl) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = renderMessagesTab();
+            const nextList = tmp.querySelector('#chats-scroll');
+            if (nextList && listEl.innerHTML !== nextList.innerHTML) {
+              const top = listEl.scrollTop;
+              listEl.innerHTML = nextList.innerHTML;
+              listEl.scrollTop = top;
+            }
+            return;
+          }
+        }
         render();
       }
 
@@ -1793,10 +1840,10 @@
         if (!roomId) return;
         ui.peerTypingRooms[roomId] = true;
         clearTimeout(peerTypingTimers[roomId]);
-        if (!updatePlusRingDOM()) safeBackgroundRender();
+        updatePlusRingDOM();
         peerTypingTimers[roomId] = setTimeout(() => {
           delete ui.peerTypingRooms[roomId];
-          if (!updatePlusRingDOM()) safeBackgroundRender();
+          updatePlusRingDOM();
         }, 2600);
       }
 
@@ -2632,6 +2679,8 @@
             upiBarcodeUrl: safeImgUrl(state.userProfile && state.userProfile.upiBarcodeUrl) || '',
             disappearTimers: state.security.disappearTimers || {},
             lockedChats: state.security.lockedChats || {},
+            permissionsPrompted: Boolean(state.security.permissionsPrompted),
+            permissionsState: state.security.permissionsState || {},
             notifPrefs: state.security.notifPrefs || { videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true },
             mutedIds: (state.chats || []).filter(c => c.muted).map(c => c.id),
             pinnedIds: Object.keys(state.security.pinnedIds || {}).filter(k => state.security.pinnedIds[k])
@@ -2682,7 +2731,7 @@
             fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at') : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=id,from_id,from_name,from_code,to_id,to_name,to_code,created_time&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
-            supaFetch('shavlo_groups', 'GET', '?select=id,code,name,description,creator_id,member_ids,admin_ids,created_at'),
+            supaFetch('shavlo_groups', 'GET', '?select=id,code,name,description,creator_id,member_ids,admin_ids,created_at,expires_at'),
             supaFetch('shavlo_messages', 'GET', msgQuery),
             fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=id,author_id,author_name,payload,expires_at&expires_at=gt.${Date.now()}`) : Promise.resolve(null),
             supaFetch('shavlo_calls', 'GET', `?select=room_id,caller_id,caller_name,callee_id,callee_name,call_type,status,started_at&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
@@ -2737,10 +2786,11 @@
           net.friendships = (friends || []).map(f => ({
             id: f.id, users: [f.user_a, f.user_b], since: f.since || ''
           }));
-          net.groups = (groups || []).map(g => ({
+          net.groups = (groups || []).filter(g => !g.expires_at || Number(g.expires_at) > Date.now()).map(g => ({
             id: g.id, code: g.code, name: g.name, desc: g.description || '',
             creatorId: g.creator_id, memberIds: Array.isArray(g.member_ids) ? g.member_ids : [],
-            createdAt: g.created_at || Date.now()
+            createdAt: g.created_at || Date.now(),
+            expiresAt: g.expires_at ? Number(g.expires_at) : null
           }));
           const groupedMsgs = {};
           const nowMs = Date.now();
@@ -2762,9 +2812,10 @@
             net.peerChats[rid] = Array.from(byId.values());
           });
           if (statuses !== null) {
-            net.statuses = (statuses || []).map(st => Object.assign({}, st.payload, {
+            const _recentLocalSt = (net.statuses || []).filter(s => s && s.id && (Date.now() - Number(s.createdAt || 0)) < 15000 && !(statuses || []).some(r => r.id === s.id));
+            net.statuses = [..._recentLocalSt, ...(statuses || []).map(st => Object.assign({}, st.payload, {
               id: st.id, authorId: st.author_id, authorName: st.author_name, expiresAt: st.expires_at
-            }));
+            }))];
           }
           net.activeCalls = {};
           (calls || []).forEach(c => {
@@ -2850,6 +2901,8 @@
                 (state.chats || []).forEach(c => { c.pinned = Boolean(state.security.pinnedIds[c.id]); });
               }
               if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
+              if (typeof pr.permissionsPrompted === 'boolean') state.security.permissionsPrompted = pr.permissionsPrompted;
+              if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
               state.prefsUpdatedAt = Number(prefsRows[0].updated_at || Date.now());
             }
           }
@@ -2921,7 +2974,8 @@
                       }
                     }
                     if (change.eventType === 'INSERT' && !wasAlreadyPresent && mapped.authorId !== activeVaultId) {
-                      notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
+                      if (ui && ui.peerTypingRooms) delete ui.peerTypingRooms[row.room_id];
+                  notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
                       const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === row.room_id && (window.innerWidth >= 768 || state.mobileView === 'chat'));
                       if (isOpenNow) markRoomRead(row.room_id); else markRoomDelivered(row.room_id);
                     }
@@ -3045,6 +3099,7 @@
                   list.push(mapped);
                   net.peerChats[row.room_id] = list;
                   saveNetwork(net, 'realtime_fast_msg');
+                  if (ui && ui.peerTypingRooms) delete ui.peerTypingRooms[row.room_id];
                   notifyIncomingMessage(mapped, mapped.authorName, row.room_id);
                   const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === row.room_id && (window.innerWidth >= 768 || state.mobileView === 'chat'));
                   if (isOpenNow) markRoomRead(row.room_id); else markRoomDelivered(row.room_id);
@@ -3092,6 +3147,7 @@
               .on('broadcast', { event: 'call_accepted' }, ({ payload }) => {
                 if (!payload || !ui.activeCall || payload.fromId === activeVaultId) return;
                 if (payload.roomId === ui.activeCall.roomId && ui.activeCall.status === 'ringing') {
+                  stopIncomingRingtone();
                   ui.activeCall.status = 'connected';
                   ui.activeCall.seconds = 0;
                   renderCallOverlay();
@@ -3101,6 +3157,43 @@
               })
               .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
                 handleWebRtcSignal(payload);
+              })
+              .on('broadcast', { event: 'group_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.id) return;
+                  if (payload.expires_at && Number(payload.expires_at) <= Date.now()) return;
+                  const net = getNetwork();
+                  net.groups = net.groups || [];
+                  if (!net.groups.some(g => g.id === payload.id)) {
+                    net.groups.unshift({
+                      id: payload.id, code: payload.code, name: payload.name,
+                      desc: payload.description || '', creatorId: payload.creator_id,
+                      memberIds: Array.isArray(payload.member_ids) ? payload.member_ids : [],
+                      createdAt: Number(payload.created_at || Date.now()),
+                      expiresAt: payload.expires_at ? Number(payload.expires_at) : null
+                    });
+                    saveNetwork(net, 'group_fast_rt');
+                    syncFromNetwork();
+                  }
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'status_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.id || !payload.payload) return;
+                  const net = getNetwork();
+                  net.statuses = net.statuses || [];
+                  const mapped = Object.assign({}, payload.payload, {
+                    id: payload.id,
+                    authorId: payload.author_id || payload.payload.authorId,
+                    authorName: payload.author_name || payload.payload.authorName,
+                    expiresAt: Number(payload.expires_at || payload.payload.expiresAt || (Date.now() + 86400000))
+                  });
+                  const idx = net.statuses.findIndex(s => s.id === mapped.id);
+                  if (idx >= 0) net.statuses[idx] = mapped;
+                  else net.statuses.unshift(mapped);
+                  saveNetwork(net, 'status_fast_rt');
+                  syncFromNetwork();
+                } catch (_) {}
               })
               .on('broadcast', { event: 'status_seen_fast' }, ({ payload }) => {
                 try {
@@ -3375,6 +3468,18 @@
       let localMediaStream = null;
       let catalogCart = {};
 
+      function saveUiNavState() {
+        try {
+          if (!state || !activeVaultId) return;
+          sessionStorage.setItem('shavlo_ui_nav_v1', JSON.stringify({
+            vaultId: activeVaultId,
+            activeNav: state.activeNav || 'messages',
+            youTab: ui.youTab || 'account',
+            settingsSubTab: ui.settingsSubTab || 'general'
+          }));
+        } catch (_) {}
+      }
+
       function persistCurrentVault() {
         if (!activeVaultId || !state) return;
         const vaults = getAllVaults();
@@ -3555,6 +3660,16 @@
           }
           if (patchedAny) return;
         }
+        if (patchActiveTabContainerInPlace()) {
+          const curBar = document.getElementById('mobile-dock-wrap');
+          if (curBar) {
+            const tmpBar = document.createElement('div');
+            tmpBar.innerHTML = renderMobileBottomBar();
+            const nextBar = tmpBar.firstElementChild;
+            if (nextBar && curBar.innerHTML !== nextBar.innerHTML) curBar.innerHTML = nextBar.innerHTML;
+          }
+          return;
+        }
         if (ae && ae.id === 'message-input') return;
         const wasNearBeforeRender = isNearChatBottom();
         const savedId = isTyping ? ae.id : '';
@@ -3595,10 +3710,10 @@
             clearTimeout(peerTypingTimers[ev.data.roomId]);
             peerTypingTimers[ev.data.roomId] = setTimeout(() => {
               delete ui.peerTypingRooms[ev.data.roomId];
-              if (!updatePlusRingDOM()) safeBackgroundRender();
+              updatePlusRingDOM();
             }, 2200);
             if (ev.data.askReply) syncOwnPresence(false, false);
-            if (!updatePlusRingDOM()) safeBackgroundRender();
+            updatePlusRingDOM();
             return;
           }
           if (ev.data.type === 'peer_presence' && ev.data.fromId && ev.data.fromId !== activeVaultId) {
@@ -3613,7 +3728,7 @@
               delete ui.onlineVaultIds[ev.data.fromId];
               delete ui.peerActiveRooms[ev.data.fromId];
             }
-            if (!updatePlusRingDOM()) safeBackgroundRender();
+            updatePlusRingDOM();
             return;
           }
           invalidateNetworkCache();
@@ -3946,6 +4061,8 @@
 
       function formatRemaining24h(expiresAt) {
         const ms = Math.max(0, (expiresAt || 0) - Date.now());
+        const days = Math.floor(ms / 86400000);
+        if (days >= 1) return `${days}d left`;
         const hrs = Math.floor(ms / 3600000);
         const mins = Math.floor((ms % 3600000) / 60000);
         if (hrs >= 1) return `${hrs}h left`;
@@ -3974,10 +4091,30 @@
         saveNetwork(net, 'status_posted');
         if (net.statuses[0]) {
           const stObj = net.statuses[0];
-          supaWriteReliable('shavlo_statuses', 'POST', '', {
-            id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name,
-            payload: stObj, expires_at: stObj.expiresAt
-          });
+          (async () => {
+            try {
+              if (stObj.photoUrl && stObj.photoUrl.startsWith('data:')) {
+                const cdnUrl = await uploadMediaToSupabaseStorage(stObj.photoUrl, 'statuses', 'jpg');
+                if (cdnUrl && /^https?:/i.test(cdnUrl)) {
+                  stObj.photoUrl = cdnUrl;
+                  saveNetwork(getNetwork(), 'status_photo_cdn');
+                }
+              }
+            } catch (_) {}
+            if (supaRealtimeChan) {
+              try {
+                supaRealtimeChan.send({
+                  type: 'broadcast',
+                  event: 'status_fast',
+                  payload: { id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name, payload: stObj, expires_at: stObj.expiresAt }
+                });
+              } catch (_) {}
+            }
+            supaWriteReliable('shavlo_statuses', 'POST', '', {
+              id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name,
+              payload: stObj, expires_at: stObj.expiresAt
+            });
+          })();
         }
         ui.modal = null;
         ui.statusDraftText = '';
@@ -4157,22 +4294,26 @@
       }
 
       // Friend Requests & Live Networking
-      function createLiveGroup(name, desc, inviteFriendIds) {
+      function createLiveGroup(name, desc, inviteFriendIds, ttlHours) {
         const cleanName = String(name || '').trim();
         if (!cleanName) { showToast('Enter a group name'); return; }
         const net = getNetwork();
         const gid = 'grp_' + Date.now();
         const code = 'GRP-' + syncHash(gid + cleanName).slice(0, 4) + '-' + syncHash(cleanName + activeVaultId).slice(0, 4);
         const members = Array.from(new Set([activeVaultId, ...(inviteFriendIds || [])]));
-        net.groups.unshift({
+        const hrs = Number(ttlHours || 0);
+        const expiresAt = hrs > 0 ? (Date.now() + hrs * 3600 * 1000) : null;
+        const newGrp = {
           id: gid,
           code,
           name: cleanName,
           desc: String(desc || '').trim() || 'Private group chat',
           creatorId: activeVaultId,
           memberIds: members,
-          createdAt: Date.now()
-        });
+          createdAt: Date.now(),
+          expiresAt
+        };
+        net.groups.unshift(newGrp);
         net.peerChats[gid] = [{
           id: 'm_grp_' + Date.now(),
           authorId: activeVaultId,
@@ -4185,10 +4326,15 @@
           starred: false
         }];
         saveNetwork(net, 'group_created');
-        supaWriteReliable('shavlo_groups', 'POST', '', {
+        const grpRow = {
           id: gid, code, name: cleanName, description: String(desc || '').trim() || 'Private group chat',
-          creator_id: activeVaultId, member_ids: members, created_at: Date.now()
-        });
+          creator_id: activeVaultId, member_ids: members, created_at: Date.now(), expires_at: expiresAt
+        };
+        if (supaRealtimeChan) {
+          try { supaRealtimeChan.send({ type: 'broadcast', event: 'group_fast', payload: grpRow }); } catch (_) {}
+        }
+        supaWriteReliable('shavlo_groups', 'POST', '', grpRow);
+        ui.groupTimerOn = false;
         const initGrpMsg = net.peerChats[gid][0];
         if (initGrpMsg) {
           supaWriteReliable('shavlo_messages', 'POST', '', {
@@ -4214,7 +4360,7 @@
         if (!grp && getSupaCfg()) {
           showToast('Looking up group on Supabase...');
           try {
-            const rows = await supaFetch('shavlo_groups', 'GET', `?code=eq.${encodeURIComponent(code)}&select=id,code,name,description,creator_id,member_ids,admin_ids,created_at`);
+            const rows = await supaFetch('shavlo_groups', 'GET', `?code=eq.${encodeURIComponent(code)}&select=id,code,name,description,creator_id,member_ids,admin_ids,created_at,expires_at`);
             if (Array.isArray(rows) && rows.length > 0) {
               const g = rows[0];
               grp = {
@@ -4647,6 +4793,7 @@
       }
 
       function acceptIncomingPeerCall() {
+        stopIncomingRingtone();
         if (!ui.activeCall || !ui.activeCall.roomId) return;
         const net = getNetwork();
         const call = net.activeCalls[ui.activeCall.roomId];
@@ -4692,6 +4839,50 @@
         showToast('Call ended');
       }
 
+            async function checkAndPromptPermissionsOnLogin() {
+        if (!state || !activeVaultId) return;
+        ensureSecurityDefaults();
+        // Check Supabase shavlo_user_prefs first so cross-device/re-login remembers granted permissions
+        if (!state.security.permissionsPrompted && getSupaCfg()) {
+          try {
+            const pRows = await supaFetch('shavlo_user_prefs', 'GET', `?select=prefs&vault_id=eq.${encodeURIComponent(activeVaultId)}`);
+            const pr = Array.isArray(pRows) && pRows[0] && pRows[0].prefs;
+            if (pr) {
+              if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
+              if (pr.permissionsPrompted) state.security.permissionsPrompted = true;
+              persistCurrentVault();
+            }
+          } catch (_) {}
+        }
+        const notifState = (typeof Notification !== 'undefined') ? Notification.permission : 'default';
+        const notifGranted = notifState === 'granted';
+        let camState = (state.security.permissionsState && state.security.permissionsState.camera) || 'prompt';
+        let micState = (state.security.permissionsState && state.security.permissionsState.microphone) || 'prompt';
+        try {
+          if (navigator.permissions && navigator.permissions.query) {
+            const c = await navigator.permissions.query({ name: 'camera' }).catch(() => null);
+            const m = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+            if (c) camState = c.state;
+            if (m) micState = m.state;
+          }
+        } catch (_) {}
+        const allGranted = notifGranted && camState === 'granted' && micState === 'granted';
+        const anyChangedRevoked = state.security.permissionsPrompted && (
+          (state.security.permissionsState && state.security.permissionsState.notifications === 'granted' && notifState !== 'granted') ||
+          (state.security.permissionsState && state.security.permissionsState.camera === 'granted' && camState === 'denied') ||
+          (state.security.permissionsState && state.security.permissionsState.microphone === 'granted' && micState === 'denied')
+        );
+        if (allGranted) {
+          state.security.permissionsPrompted = true;
+          state.security.permissionsState = { notifications: 'granted', camera: 'granted', microphone: 'granted' };
+          persistCurrentVault();
+          return;
+        }
+        if (state.security.permissionsPrompted && !anyChangedRevoked) return;
+        ui.modal = 'permissionsOnboarding';
+        renderModal();
+      }
+
       // Auth Flows
       async function completeSignup() {
         const words = authState.generatedSeed;
@@ -4711,6 +4902,7 @@
         authState.authError = '';
         render();
         showToast(`Welcome, ${displayName} • Code: ${friendCode}`);
+        setTimeout(() => { checkAndPromptPermissionsOnLogin(); }, 450);
       }
 
       async function completeLogin(words) {
@@ -4747,6 +4939,7 @@
         try { const _c = getSupaCfg(); if (_c && _c.url) fetch(_c.url + '/functions/v1/shavlo-sync', { method: 'GET' }).catch(() => {}); } catch (_) {}
         try { const net = getNetwork(); Object.keys(net.directory || {}).forEach(pid => { if (pid !== activeVaultId) deriveRoomAesKey(makeRoomId(activeVaultId, pid)); }); } catch (_) {}
         showToast(`Signed in as ${state.userProfile.name}`);
+        setTimeout(() => { checkAndPromptPermissionsOnLogin(); }, 450);
         try {
           const pendingChat = sessionStorage.getItem('shavlo_pending_chat');
           if (pendingChat) {
@@ -6606,7 +6799,7 @@
                             <span class="text-[11.5px] font-medium tabular-nums tracking-[-0.01em] text-muted/85 shrink-0">${escapeHtml(c.lastTime)}</span>
                           </div>
                           <div class="flex items-center justify-between gap-2.5 mt-1">
-                            <p class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted truncate flex items-center gap-1">${lockedMap[c.id] ? '<span class="italic text-brand-500/85">Locked chat • Passcode required</span>' : ((ui.typingChatId === c.id || ui.peerTypingRooms[c.id]) ? '<span class="text-brand-500 font-medium">typing...</span>' : ((c.messages && c.messages.length && c.messages[c.messages.length - 1].sender === 'me') ? renderTicks(c.messages[c.messages.length - 1].status, false) : '') + '<span class="truncate">' + escapeHtml(getLastPreview(c)) + '</span>')}</p>
+                            <p class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted truncate flex items-center gap-1">${lockedMap[c.id] ? '<span class="italic text-brand-500/85">Locked chat • Passcode required</span>' : (((c.messages && c.messages.length && c.messages[c.messages.length - 1].sender === 'me') ? renderTicks(c.messages[c.messages.length - 1].status, false) : '') + '<span class="truncate">' + escapeHtml(getLastPreview(c)) + '</span>')}</p>
                             ${c.unread > 0 ? `<span class="min-w-[20px] h-5 px-1.5 rounded-full bg-brand-500 text-white text-[11px] font-bold tabular-nums flex items-center justify-center shrink-0">${c.unread}</span>` : ''}
                           </div>
                         </div>
@@ -7212,10 +7405,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
                 <!-- Tab Bar: Account | Settings -->
                 <div class="grid grid-cols-2 p-1 rounded-full bg-surface dark:bg-zinc-900">
-                  <button data-action="you-tab" data-tab="account" class="py-2.5 rounded-full text-[14px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.youTab === 'account' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
+                  <button type="button" data-action="you-tab" data-tab="account" class="py-2.5 rounded-full text-[14px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.youTab === 'account' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
                     ${icon('key', 'w-4 h-4')}<span>Account</span>
                   </button>
-                  <button data-action="you-tab" data-tab="settings" class="py-2.5 rounded-full text-[14px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.youTab === 'settings' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
+                  <button type="button" data-action="you-tab" data-tab="settings" class="py-2.5 rounded-full text-[14px] font-semibold transition flex items-center justify-center gap-1.5 ${ui.youTab === 'settings' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">
                     ${icon('settings', 'w-4 h-4')}<span>Settings</span>
                   </button>
                 </div>
@@ -7503,6 +7696,53 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     </form>
                   </div>
 
+                  <!-- SETTINGS SUB-TABS: General | Permissions -->
+                  <div class="grid grid-cols-2 p-1 rounded-full bg-surface dark:bg-zinc-900">
+                    <button type="button" data-action="settings-subtab" data-sub="general" class="py-2 rounded-full text-[13px] font-semibold transition ${(ui.settingsSubTab || 'general') === 'general' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">General</button>
+                    <button type="button" data-action="settings-subtab" data-sub="permissions" class="py-2 rounded-full text-[13px] font-semibold transition ${ui.settingsSubTab === 'permissions' ? 'bg-white dark:bg-zinc-800 text-ink dark:text-white shadow-sm' : 'text-muted'}">Permissions</button>
+                  </div>
+
+                  ${ui.settingsSubTab === 'permissions' ? (() => {
+                    ensureSecurityDefaults();
+                    const ps = state.security.permissionsState || {};
+                    const nOk = (typeof Notification !== 'undefined' && Notification.permission === 'granted') || ps.notifications === 'granted';
+                    const cOk = ps.camera === 'granted';
+                    const mOk = ps.microphone === 'granted';
+                    const rows = [
+                      { key: 'notifications', title: 'Notifications', desc: 'Calls, messages & Walkie-Talkie alerts', ico: 'bell', ok: nOk },
+                      { key: 'camera', title: 'Camera', desc: 'Video calls, status photos & QR scanner', ico: 'camera', ok: cOk },
+                      { key: 'microphone', title: 'Microphone', desc: 'Voice & video calls, voice notes & PTT', ico: 'mic', ok: mOk }
+                    ];
+                    return `
+                      <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 space-y-4">
+                        <div class="flex items-center justify-between gap-2">
+                          <div>
+                            <div class="text-[15.5px] font-semibold">App Permissions</div>
+                            <div class="text-[12px] text-muted">Synced in real time to your account</div>
+                          </div>
+                          <button type="button" data-action="perm-grant-all" class="px-3.5 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold hover:opacity-90 transition">Allow All</button>
+                        </div>
+                        <div class="divide-y divide-zinc-100 dark:divide-zinc-900">
+                          ${rows.map(r => `
+                            <div class="py-3 flex items-center justify-between gap-3">
+                              <div class="flex items-center gap-3 min-w-0">
+                                <div class="w-10 h-10 rounded-full bg-surface dark:bg-zinc-900 border border-[#C6A76D]/25 flex items-center justify-center text-[#C6A76D] shrink-0">
+                                  ${icon(r.ico, 'w-4 h-4')}
+                                </div>
+                                <div class="min-w-0">
+                                  <div class="text-[14px] font-semibold text-ink dark:text-white">${r.title}</div>
+                                  <div class="text-[11.5px] text-muted truncate">${r.desc}</div>
+                                </div>
+                              </div>
+                              <button type="button" data-action="perm-grant-one" data-perm="${r.key}" class="px-3.5 py-1.5 rounded-full text-[12px] font-bold shrink-0 transition ${r.ok ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] hover:opacity-90'}">
+                                ${r.ok ? 'Allowed ✓' : 'Allow'}
+                              </button>
+                            </div>
+                          `).join('')}
+                        </div>
+                      </div>
+                    `;
+                  })() : `
                   <!-- SETTINGS TAB: Clean End-User Connection Status -->
                   <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#111114] border border-zinc-200/60 dark:border-zinc-800/80 flex items-center justify-between gap-3">
                     <div>
@@ -7586,6 +7826,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       </div>
                     `}
                   </div>
+                  ` }
 
 
                 `}
@@ -7672,6 +7913,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   </div>
                 </div>
               ` : ''}
+              <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900 space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[13.5px] font-semibold text-ink dark:text-white">Auto-Delete Timer</div>
+                    <div class="text-[11.5px] text-muted">Automatically remove group when time ends</div>
+                  </div>
+                  <button type="button" data-action="toggle-group-timer" role="switch" aria-checked="${ui.groupTimerOn ? 'true' : 'false'}" class="w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${ui.groupTimerOn ? 'bg-[#09090C] dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-800'} flex items-center ${ui.groupTimerOn ? 'justify-end' : 'justify-start'} shrink-0">
+                    <span class="w-5 h-5 rounded-full ${ui.groupTimerOn ? 'bg-white dark:bg-[#09090C]' : 'bg-white dark:bg-zinc-400'} shadow-sm transition-transform"></span>
+                  </button>
+                </div>
+                ${ui.groupTimerOn ? `
+                  <div class="flex flex-wrap gap-1.5 pt-1">
+                    ${[
+                      { h: 1, label: '1h' },
+                      { h: 6, label: '6h' },
+                      { h: 24, label: '24h' },
+                      { h: 72, label: '3d' },
+                      { h: 168, label: '7d' }
+                    ].map(opt => `
+                      <button type="button" data-action="set-group-ttl" data-hours="${opt.h}" class="px-3 py-1 rounded-full text-[12px] font-semibold transition ${(ui.groupTtlHours || 24) === opt.h ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'bg-white dark:bg-zinc-800 text-muted'}">${opt.label}</button>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
               <div class="flex justify-end gap-2 pt-2">
                 <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
                 <button type="submit" class="px-5 py-2.5 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white text-[13.5px] font-semibold transition">Create Group</button>
@@ -7745,6 +8010,51 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               </div>
               <button type="submit" class="w-full py-2.5 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold hover:opacity-90 transition">Save Username</button>
             </form>
+          `;
+        } else if (ui.modal === 'permissionsOnboarding') {
+          ensureSecurityDefaults();
+          const ps = state.security.permissionsState || {};
+          const nOk = (typeof Notification !== 'undefined' && Notification.permission === 'granted') || ps.notifications === 'granted';
+          const cOk = ps.camera === 'granted';
+          const mOk = ps.microphone === 'granted';
+          const rows = [
+            { key: 'notifications', title: 'Notifications', desc: 'Calls, messages & Walkie-Talkie alerts', ico: 'bell', ok: nOk },
+            { key: 'camera', title: 'Camera', desc: 'Video calls, status photos & QR scanner', ico: 'camera', ok: cOk },
+            { key: 'microphone', title: 'Microphone', desc: 'Voice & video calls, voice notes & PTT', ico: 'mic', ok: mOk }
+          ];
+          inner = `
+            <div class="space-y-4 py-1">
+              <div class="text-center">
+                <h3 class="title-display font-bold text-[21px] text-ink dark:text-white">App Permissions</h3>
+                <p class="text-[13px] text-muted mt-1">Allow these once for smooth calling, camera, and real-time alerts.</p>
+              </div>
+              <div class="divide-y divide-black/[0.06] dark:divide-white/[0.08] rounded-3xl bg-surface/80 dark:bg-zinc-900/80 px-4">
+                ${rows.map(r => `
+                  <div class="py-3.5 flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                      <div class="w-10 h-10 rounded-full bg-white dark:bg-zinc-800 border border-[#C6A76D]/25 flex items-center justify-center text-[#C6A76D] shrink-0">
+                        ${icon(r.ico, 'w-4 h-4')}
+                      </div>
+                      <div class="min-w-0">
+                        <div class="text-[14px] font-semibold text-ink dark:text-white">${r.title}</div>
+                        <div class="text-[11.5px] text-muted truncate">${r.desc}</div>
+                      </div>
+                    </div>
+                    <button type="button" data-action="perm-grant-one" data-perm="${r.key}" class="px-3.5 py-1.5 rounded-full text-[12px] font-bold shrink-0 transition ${r.ok ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] hover:opacity-90'}">
+                      ${r.ok ? 'Allowed ✓' : 'Allow'}
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="space-y-2 pt-1">
+                <button type="button" data-action="perm-grant-all" class="w-full py-3 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[14px] font-bold hover:opacity-90 active:scale-[0.98] transition">
+                  Allow All &amp; Continue
+                </button>
+                <button type="button" data-action="perm-step-skip" class="w-full py-2 rounded-full text-[13px] font-semibold text-muted hover:text-ink dark:hover:text-white transition">
+                  Continue
+                </button>
+              </div>
+            </div>
           `;
         } else if (ui.modal === 'quickCamera') {
           inner = `
@@ -8306,6 +8616,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <form id="split-form" class="mt-4 space-y-3">
               <input name="title" type="text" required placeholder="What is this bill for?" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               <input name="total" type="number" min="10" required placeholder="Total amount in ₹" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[16px] font-bold" />
+              <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900 space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[13.5px] font-semibold text-ink dark:text-white">Auto-Delete Timer</div>
+                    <div class="text-[11.5px] text-muted">Automatically remove group when time ends</div>
+                  </div>
+                  <button type="button" data-action="toggle-group-timer" role="switch" aria-checked="${ui.groupTimerOn ? 'true' : 'false'}" class="w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${ui.groupTimerOn ? 'bg-[#09090C] dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-800'} flex items-center ${ui.groupTimerOn ? 'justify-end' : 'justify-start'} shrink-0">
+                    <span class="w-5 h-5 rounded-full ${ui.groupTimerOn ? 'bg-white dark:bg-[#09090C]' : 'bg-white dark:bg-zinc-400'} shadow-sm transition-transform"></span>
+                  </button>
+                </div>
+                ${ui.groupTimerOn ? `
+                  <div class="flex flex-wrap gap-1.5 pt-1">
+                    ${[
+                      { h: 1, label: '1h' },
+                      { h: 6, label: '6h' },
+                      { h: 24, label: '24h' },
+                      { h: 72, label: '3d' },
+                      { h: 168, label: '7d' }
+                    ].map(opt => `
+                      <button type="button" data-action="set-group-ttl" data-hours="${opt.h}" class="px-3 py-1 rounded-full text-[12px] font-semibold transition ${(ui.groupTtlHours || 24) === opt.h ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'bg-white dark:bg-zinc-800 text-muted'}">${opt.label}</button>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
               <div class="flex justify-end gap-2 pt-2">
                 <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
                 <button type="submit" class="px-5 py-2 rounded-2xl bg-brand-500 text-white text-[13.5px] font-semibold">Share Split</button>
@@ -8460,6 +8794,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <input name="leftOpt" type="text" required placeholder="Left (e.g. Goa)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
                 <input name="rightOpt" type="text" required placeholder="Right (e.g. Manali)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               </div>
+              <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900 space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[13.5px] font-semibold text-ink dark:text-white">Auto-Delete Timer</div>
+                    <div class="text-[11.5px] text-muted">Automatically remove group when time ends</div>
+                  </div>
+                  <button type="button" data-action="toggle-group-timer" role="switch" aria-checked="${ui.groupTimerOn ? 'true' : 'false'}" class="w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${ui.groupTimerOn ? 'bg-[#09090C] dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-800'} flex items-center ${ui.groupTimerOn ? 'justify-end' : 'justify-start'} shrink-0">
+                    <span class="w-5 h-5 rounded-full ${ui.groupTimerOn ? 'bg-white dark:bg-[#09090C]' : 'bg-white dark:bg-zinc-400'} shadow-sm transition-transform"></span>
+                  </button>
+                </div>
+                ${ui.groupTimerOn ? `
+                  <div class="flex flex-wrap gap-1.5 pt-1">
+                    ${[
+                      { h: 1, label: '1h' },
+                      { h: 6, label: '6h' },
+                      { h: 24, label: '24h' },
+                      { h: 72, label: '3d' },
+                      { h: 168, label: '7d' }
+                    ].map(opt => `
+                      <button type="button" data-action="set-group-ttl" data-hours="${opt.h}" class="px-3 py-1 rounded-full text-[12px] font-semibold transition ${(ui.groupTtlHours || 24) === opt.h ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'bg-white dark:bg-zinc-800 text-muted'}">${opt.label}</button>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
               <div class="flex justify-end gap-2 pt-2">
                 <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
                 <button type="submit" class="px-5 py-2 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-semibold">Start Tug</button>
@@ -8494,6 +8852,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <input name="opt1" type="text" required placeholder="Option 1" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               <input name="opt2" type="text" required placeholder="Option 2" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
               <input name="opt3" type="text" placeholder="Option 3 (optional)" class="w-full px-3.5 py-2.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[14px]" />
+              <div class="p-3.5 rounded-2xl bg-surface dark:bg-zinc-900 space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[13.5px] font-semibold text-ink dark:text-white">Auto-Delete Timer</div>
+                    <div class="text-[11.5px] text-muted">Automatically remove group when time ends</div>
+                  </div>
+                  <button type="button" data-action="toggle-group-timer" role="switch" aria-checked="${ui.groupTimerOn ? 'true' : 'false'}" class="w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${ui.groupTimerOn ? 'bg-[#09090C] dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-800'} flex items-center ${ui.groupTimerOn ? 'justify-end' : 'justify-start'} shrink-0">
+                    <span class="w-5 h-5 rounded-full ${ui.groupTimerOn ? 'bg-white dark:bg-[#09090C]' : 'bg-white dark:bg-zinc-400'} shadow-sm transition-transform"></span>
+                  </button>
+                </div>
+                ${ui.groupTimerOn ? `
+                  <div class="flex flex-wrap gap-1.5 pt-1">
+                    ${[
+                      { h: 1, label: '1h' },
+                      { h: 6, label: '6h' },
+                      { h: 24, label: '24h' },
+                      { h: 72, label: '3d' },
+                      { h: 168, label: '7d' }
+                    ].map(opt => `
+                      <button type="button" data-action="set-group-ttl" data-hours="${opt.h}" class="px-3 py-1 rounded-full text-[12px] font-semibold transition ${(ui.groupTtlHours || 24) === opt.h ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'bg-white dark:bg-zinc-800 text-muted'}">${opt.label}</button>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
               <div class="flex justify-end gap-2 pt-2">
                 <button type="button" data-action="close-modal" class="px-4 py-2 rounded-2xl text-[13.5px] font-semibold text-muted">Cancel</button>
                 <button type="submit" class="px-5 py-2 rounded-2xl bg-brand-500 text-white text-[13.5px] font-semibold">Post Poll</button>
@@ -9060,18 +9442,47 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <p class="title-display text-[22px] font-bold leading-snug text-center px-3 pointer-events-none">${escapeHtml(st.text)}</p>
             </div>
 
-            <!-- Eye Seen Button (own status) + Reaction Pills -->
+            <!-- Eye Seen Button (own status) + Slide-Up Viewers Pop-up Sheet -->
             ${isMine ? (() => {
               const netDir = getNetwork().directory || {};
-              const viewers = (st.seenBy || []).filter(vid => vid && vid !== activeVaultId).map(vid => (st.seenNames && st.seenNames[vid]) || (netDir[vid] && netDir[vid].name) || 'Contact');
+              const viewerList = (st.seenBy || []).filter(vid => vid && vid !== activeVaultId).map(vid => {
+                const u = netDir[vid] || {};
+                const vName = (st.seenNames && st.seenNames[vid]) || u.name || 'Contact';
+                return { id: vid, name: vName, avatarUrl: u.avatarUrl || '', initial: getInitial(vName) };
+              });
               return `
-                <div class="relative z-20 mb-2 flex flex-col items-center gap-1.5">
-                  ${ui.statusViewersOpen && viewers.length ? `<div class="px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md text-[12px] font-medium text-white/95">${escapeHtml(viewers.join(', '))}</div>` : ''}
-                  <button type="button" data-action="toggle-status-viewers" title="Seen" class="px-3.5 py-1.5 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-[13px] font-semibold text-white inline-flex items-center gap-1.5 transition">
+                <div class="relative z-20 mb-2 flex flex-col items-center">
+                  <button type="button" data-action="toggle-status-viewers" title="Viewed by" class="px-3.5 py-1.5 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-[13px] font-semibold text-white inline-flex items-center gap-1.5 transition">
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                    <span class="tabular-nums">${viewers.length}</span>
+                    <span class="tabular-nums">${viewerList.length}</span>
                   </button>
                 </div>
+                ${ui.statusViewersOpen ? `
+                  <div data-action="toggle-status-viewers" class="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end justify-center cursor-pointer">
+                    <div style="padding-bottom:max(1.25rem, env(safe-area-inset-bottom));" class="animate-slide-up w-full max-w-lg rounded-t-[34px] bg-[#111114]/95 backdrop-blur-2xl border-t border-white/15 px-5 pt-3 text-white shadow-2xl">
+                      <div class="w-10 h-1 rounded-full bg-white/30 mx-auto mb-3"></div>
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                          <svg class="w-4 h-4 text-[#C6A76D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                          <h4 class="title-display text-[16px] font-bold">Viewed by ${viewerList.length}</h4>
+                        </div>
+                      </div>
+                      <div class="max-h-[45vh] overflow-y-auto thin-scroll divide-y divide-white/10">
+                        ${viewerList.length === 0 ? `
+                          <p class="py-6 text-center text-[13px] text-white/60">No one has viewed this story yet.</p>
+                        ` : viewerList.map(v => `
+                          <div class="py-2.5 flex items-center justify-between gap-3">
+                            <div class="flex items-center gap-3 min-w-0">
+                              ${renderAvatar(v.initial, v.avatarUrl, 'w-10 h-10 text-[13px] font-bold', 'bg-white/15 text-white')}
+                              <span class="text-[14.5px] font-semibold truncate">${escapeHtml(v.name)}</span>
+                            </div>
+                            <span class="text-[11.5px] text-[#C6A76D] font-semibold shrink-0">Seen</span>
+                          </div>
+                        `).join('')}
+                      </div>
+                    </div>
+                  </div>
+                ` : ''}
               `;
             })() : ''}
             <div class="relative z-20 flex items-center justify-center gap-2.5">
@@ -9118,6 +9529,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (nextIdx >= list.length) {
           clearTimeout(statusAutoTimer);
           ui.activeStatusId = null;
+          ui.statusViewersOpen = false;
           renderStatusViewer();
           render();
           return;
@@ -9309,7 +9721,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
       // Event Delegation
       document.addEventListener('click', (e) => {
-        if (state && activeVaultId) ensureNotificationPermission();
         const btn = e.target.closest('[data-action]');
         if (!btn) return;
         const action = btn.dataset.action;
@@ -9367,6 +9778,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           if (suppressNextDockClick) { suppressNextDockClick = false; return; }
           state.activeNav = btn.dataset.nav;
           ui.attachMenuOpen = false;
+          saveUiNavState();
           persistCurrentVault();
           syncOwnPresence();
           render();
@@ -9430,9 +9842,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           persistCurrentVault();
           render();
           showToast('Chat wallpaper updated');
+        } else if (action === 'settings-subtab') {
+          ui.settingsSubTab = btn.dataset.sub || 'general';
+          saveUiNavState();
+          if (!patchActiveTabContainerInPlace()) render();
         } else if (action === 'you-tab') {
           ui.youTab = btn.dataset.tab;
-          render();
+          saveUiNavState();
+          if (!patchActiveTabContainerInPlace()) render();
         } else if (action === 'menu-go-payments') {
           ui.modal = null;
           state.activeNav = 'you';
@@ -9604,6 +10021,74 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.attachMenuOpen = false;
           ui.modal = btn.dataset.modal;
           renderModal();
+        } else if (action === 'perm-grant-one' || action === 'perm-grant-all' || action === 'perm-step-skip') {
+          ensureSecurityDefaults();
+          state.security.permissionsState = state.security.permissionsState || {};
+          const reqNotif = async () => {
+            try {
+              if (typeof Notification !== 'undefined' && Notification.requestPermission) {
+                const res = await Notification.requestPermission();
+                state.security.permissionsState.notifications = res;
+                if (res === 'granted' && typeof subscribeToWebPush === 'function') {
+                  const vk = SHAVLO_VAPID_PUBLIC_KEY || (() => { try { return localStorage.getItem('shavlo_vapid_pub_v1') || ''; } catch (e) { return ''; } })();
+                  if (vk) await subscribeToWebPush(vk).catch(() => {});
+                }
+              }
+            } catch (_) {}
+          };
+          const reqCam = async () => {
+            try {
+              if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                s.getTracks().forEach(t => t.stop());
+                state.security.permissionsState.camera = 'granted';
+              }
+            } catch (_) { state.security.permissionsState.camera = 'denied'; }
+          };
+          const reqMic = async () => {
+            try {
+              if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                s.getTracks().forEach(t => t.stop());
+                state.security.permissionsState.microphone = 'granted';
+              }
+            } catch (_) { state.security.permissionsState.microphone = 'denied'; }
+          };
+          if (action === 'perm-step-skip') {
+            state.security.permissionsPrompted = true;
+            persistCurrentVault();
+            if (typeof syncPrefsToSupabase === 'function') syncPrefsToSupabase();
+            ui.modal = null;
+            renderModal();
+          } else if (action === 'perm-grant-one') {
+            const pKey = btn.dataset.perm;
+            (async () => {
+              if (pKey === 'notifications') await reqNotif();
+              else if (pKey === 'camera') await reqCam();
+              else if (pKey === 'microphone') await reqMic();
+              persistCurrentVault();
+              if (typeof syncPrefsToSupabase === 'function') syncPrefsToSupabase();
+              renderModal();
+              if (state.activeNav === 'you' && ui.youTab === 'settings' && ui.settingsSubTab === 'permissions') {
+                if (!patchActiveTabContainerInPlace()) render();
+              }
+            })();
+          } else {
+            (async () => {
+              await reqNotif();
+              await reqCam();
+              await reqMic();
+              state.security.permissionsPrompted = true;
+              persistCurrentVault();
+              if (typeof syncPrefsToSupabase === 'function') syncPrefsToSupabase();
+              ui.modal = null;
+              renderModal();
+              if (state.activeNav === 'you' && ui.youTab === 'settings' && ui.settingsSubTab === 'permissions') {
+                if (!patchActiveTabContainerInPlace()) render();
+              }
+              showToast('All permissions ready');
+            })();
+          }
         } else if (action === 'close-modal' || (action === 'close-modal-backdrop' && e.target === btn)) {
             if (typeof stopQrScanner === 'function') stopQrScanner();
             ui.pendingUnlockChatId = null;
@@ -10170,7 +10655,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             const cur = state.security.notifPrefs[k] !== false;
             state.security.notifPrefs[k] = !cur;
             persistCurrentVault();
-            render();
+            if (!patchActiveTabContainerInPlace()) render();
             showToast((!cur ? 'Enabled ' : 'Muted ') + k + ' alerts');
           }
         } else if (action === 'enable-push-notifs') {
@@ -10178,14 +10663,19 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             try {
               if (typeof Notification === 'undefined') { showToast('Notifications not supported in this browser'); return; }
               const perm = await Notification.requestPermission();
+              ensureSecurityDefaults();
+              state.security.permissionsState = state.security.permissionsState || {};
+              state.security.permissionsState.notifications = perm;
+              persistCurrentVault();
+              if (typeof syncPrefsToSupabase === 'function') syncPrefsToSupabase();
               if (perm === 'granted') {
                 const vk = SHAVLO_VAPID_PUBLIC_KEY || (() => { try { return localStorage.getItem('shavlo_vapid_pub_v1') || ''; } catch (e) { return ''; } })();
-                if (vk) await subscribeToWebPush(vk);
+                if (vk) await subscribeToWebPush(vk).catch(() => {});
                 showToast('Notifications enabled');
               } else {
                 showToast('Enable notifications in browser/phone Settings');
               }
-              render();
+              if (!patchActiveTabContainerInPlace()) render();
             } catch (_) { showToast('Could not enable notifications'); }
           })();
         } else if (action === 'remove-session') {
@@ -10364,15 +10854,25 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.activeStatusId = stId;
           markStatusSeen(stId);
           renderStatusViewer();
+        } else if (action === 'toggle-group-timer') {
+          ui.groupTimerOn = !ui.groupTimerOn;
+          if (ui.groupTimerOn && !ui.groupTtlHours) ui.groupTtlHours = 24;
+          renderModal();
+        } else if (action === 'set-group-ttl') {
+          ui.groupTtlHours = Number(btn.dataset.hours || 24);
+          renderModal();
         } else if (action === 'toggle-status-viewers') {
           ui.statusViewersOpen = !ui.statusViewersOpen;
+          if (ui.statusViewersOpen) clearTimeout(statusAutoTimer);
           renderStatusViewer();
         } else if (action === 'close-status' || (action === 'close-status-backdrop' && e.target === btn)) {
           clearTimeout(statusAutoTimer);
           ui.activeStatusId = null;
+          ui.statusViewersOpen = false;
           renderStatusViewer();
           render();
         } else if (action === 'nav-status') {
+          ui.statusViewersOpen = false;
           transitionStatusCube(Number(btn.dataset.dir) > 0 ? 1 : -1, 0);
         } else if (action === 'delete-status') {
           clearTimeout(statusAutoTimer);
@@ -10389,6 +10889,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           clearTimeout(statusAutoTimer);
           const em = btn.dataset.emoji;
           ui.activeStatusId = null;
+          ui.statusViewersOpen = false;
           renderStatusViewer();
           render();
           showToast(`Reacted ${em}`);
@@ -10739,7 +11240,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (e.target.id === 'new-group-form') {
           e.preventDefault();
           const fd = new FormData(e.target);
-          createLiveGroup(fd.get('name'), fd.get('desc'), fd.getAll('members'));
+          createLiveGroup(fd.get('name'), fd.get('desc'), fd.getAll('members'), ui.groupTimerOn ? (ui.groupTtlHours || 24) : 0);
         } else if (e.target.id === 'join-group-inline-form') {
           e.preventDefault();
           joinLiveGroupByCode(new FormData(e.target).get('code'));
@@ -12198,6 +12699,17 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (vaults[existingId]) {
           activeVaultId = existingId;
           state = vaults[existingId];
+          try {
+            const rawUiNav = sessionStorage.getItem('shavlo_ui_nav_v1');
+            if (rawUiNav) {
+              const parsedNav = JSON.parse(rawUiNav);
+              if (parsedNav && parsedNav.vaultId === existingId) {
+                if (parsedNav.activeNav) state.activeNav = parsedNav.activeNav;
+                if (parsedNav.youTab) ui.youTab = parsedNav.youTab;
+                if (parsedNav.settingsSubTab) ui.settingsSubTab = parsedNav.settingsSubTab;
+              }
+            }
+          } catch (_) {}
           if (state.userProfile && String(state.userProfile.friendCode || '').length > 10) {
             const baseHex = String(existingId || 'A1B2C3D4E5F6').replace(/[^A-F0-9]/gi, 'A').padEnd(12, '0');
             state.userProfile.friendCode = String((parseInt(baseHex.slice(0, 12), 16) % 900000000) + 100000000);
