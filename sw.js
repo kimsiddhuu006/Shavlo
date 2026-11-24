@@ -1,5 +1,5 @@
 // shavlo Service Worker — Offline Shell Cache + Rich Web Push + Quick Reply + Background Sync
-const CACHE_NAME = 'shavlo-shell-v261';
+const CACHE_NAME = 'shavlo-shell-v272';
 const MEDIA_CACHE = 'shavlo-media-cache-v1';
 const SHELL_ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
@@ -13,7 +13,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE_NAME && k !== MEDIA_CACHE).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -26,12 +26,12 @@ self.addEventListener('fetch', (event) => {
   if (url.hostname.endsWith('.supabase.co') && url.pathname.includes('/storage/v1/object/public/shavlo-media/')) {
     event.respondWith(
       caches.open(MEDIA_CACHE).then((cache) =>
-        cache.match(req).then((cached) => {
+        cache.match(req, { ignoreSearch: true }).then((cached) => {
           if (cached) return cached;
           return fetch(req).then((res) => {
             if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
             return res;
-          });
+          }).catch(() => Response.error());
         })
       )
     );
