@@ -26,10 +26,10 @@
           },
           colors: {
             brand: {
-              50: '#F1F2F4',
-              100: '#E2E4E9',
-              500: '#0D0D10',
-              600: '#000000',
+              50: '#EEF5FF',
+              100: '#DBEAFE',
+              500: '#3F89F6',
+              600: '#2563EB',
             },
             ink: '#0D0D10',
             muted: '#6E6E78',
@@ -3108,13 +3108,26 @@
               }
             }
           });
-          net.requests = (reqs || []).map(r => ({
-            id: r.id, fromId: r.from_id, fromName: r.from_name, fromCode: r.from_code,
-            toId: r.to_id, toName: r.to_name, toCode: r.to_code, time: r.created_time || ''
-          }));
-          net.friendships = (friends || []).map(f => ({
-            id: f.id, users: [f.user_a, f.user_b], since: f.since || ''
-          }));
+          const outboxQ = loadSupaOutbox();
+          if (Array.isArray(reqs)) {
+            const reqMap = new Map(reqs.map(r => [r.id, {
+              id: r.id, fromId: r.from_id, fromName: r.from_name, fromCode: r.from_code,
+              toId: r.to_id, toName: r.to_name, toCode: r.to_code, time: r.created_time || ''
+            }]));
+            outboxQ.filter(op => op.table === 'shavlo_requests' && op.method === 'POST' && op.body && op.body.id).forEach(op => {
+              const r = op.body;
+              if (!reqMap.has(r.id)) reqMap.set(r.id, { id: r.id, fromId: r.from_id, fromName: r.from_name, fromCode: r.from_code, toId: r.to_id, toName: r.to_name, toCode: r.to_code, time: r.created_time || '' });
+            });
+            net.requests = Array.from(reqMap.values());
+          }
+          if (Array.isArray(friends)) {
+            const frMap = new Map(friends.map(f => [f.id, { id: f.id, users: [f.user_a, f.user_b], since: f.since || '' }]));
+            outboxQ.filter(op => op.table === 'shavlo_friendships' && op.method === 'POST' && op.body && op.body.id).forEach(op => {
+              const f = op.body;
+              if (!frMap.has(f.id)) frMap.set(f.id, { id: f.id, users: [f.user_a, f.user_b], since: f.since || '' });
+            });
+            net.friendships = Array.from(frMap.values());
+          }
           net.groups = (groups || []).filter(g => !g.expires_at || Number(g.expires_at) > Date.now()).map(g => ({
             id: g.id, code: g.code, name: g.name, desc: g.description || '',
             creatorId: g.creator_id, memberIds: Array.isArray(g.member_ids) ? g.member_ids : [],
@@ -3133,9 +3146,35 @@
           if (directoryUpdated) {
             try { localStorage.setItem(NETWORK_KEY, JSON.stringify(net)); } catch (_) {}
           }
+          let allMsgRows = Array.isArray(msgs) ? msgs.slice() : [];
+          if (forceFull || supaSyncTickCount === 1) {
+            try {
+              const dmRoomIds = new Set();
+              (net.friendships || []).forEach(f => {
+                if (f && Array.isArray(f.users) && f.users.includes(activeVaultId)) {
+                  const peerId = f.users.find(u => u && u !== activeVaultId);
+                  if (peerId) dmRoomIds.add(makeRoomId(activeVaultId, peerId));
+                }
+              });
+              const dmReq = dmRoomIds.size > 0
+                ? supaFetch('shavlo_messages', 'GET', `?select=id,room_id,author_id,author_name,payload,created_at,expires_at&room_id=in.(${encodeURIComponent(Array.from(dmRoomIds).slice(0, 60).map(r => `"${String(r).replace(/"/g, '')}"`).join(','))})&order=created_at.desc&limit=500`).catch(() => [])
+                : supaFetch('shavlo_messages', 'GET', `?select=id,room_id,author_id,author_name,payload,created_at,expires_at&room_id=ilike.*${vidEnc}*&order=created_at.desc&limit=500`).catch(() => []);
+              const dmMsgs = await dmReq;
+              if (Array.isArray(dmMsgs) && dmMsgs.length > 0) {
+                const seenIds = new Set(allMsgRows.map(m => m.id));
+                dmMsgs.reverse().forEach(rm => {
+                  if (rm && rm.id && !seenIds.has(rm.id)) {
+                    seenIds.add(rm.id);
+                    allMsgRows.push(rm);
+                  }
+                });
+              }
+            } catch (_) {}
+          }
           const groupedMsgs = {};
           const nowMs = Date.now();
-          for (const row of (msgs || [])) {
+          for (const row of allMsgRows) {
+            if (!row || row.room_id === 'world_global_chat') continue;
             if (row.expires_at && Number(row.expires_at) < nowMs) continue;
             if (row.deleted_at) continue;
             const decPl = await decryptMsgPayload(row.room_id, row.payload);
@@ -3156,7 +3195,7 @@
                 notifyIncomingMessage(m, m.authorName || 'New Message', rid);
               }
             });
-            net.peerChats[rid] = Array.from(byId.values());
+            net.peerChats[rid] = Array.from(byId.values()).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
             const hasIncomingFromPeer = groupedMsgs[rid].some(m => m.authorId && m.authorId !== activeVaultId);
             if (hasIncomingFromPeer) {
               const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === rid && (window.innerWidth >= 768 || state.mobileView === 'chat'));
@@ -5405,7 +5444,7 @@
             });
           } catch (_) {}
         }
-        supaWriteReliable('shavlo_requests', 'POST', '', {
+        supaWriteReliable('shavlo_requests', 'POST', '?on_conflict=id', {
           id: newReq.id, from_id: newReq.fromId, from_name: newReq.fromName, from_code: newReq.fromCode,
           to_id: newReq.toId, to_name: newReq.toName, to_code: newReq.toCode, created_time: newReq.time
         });
@@ -5447,7 +5486,7 @@
               });
             } catch (_) {}
           }
-          supaWriteReliable('shavlo_friendships', 'POST', '', { id: frId, user_a: req.fromId, user_b: req.toId, since: sinceTxt });
+          supaWriteReliable('shavlo_friendships', 'POST', '?on_conflict=id', { id: frId, user_a: req.fromId, user_b: req.toId, since: sinceTxt });
           supaWriteReliable('shavlo_requests', 'DELETE', `?id=eq.${encodeURIComponent(req.id)}`, null);
           const roomId = makeRoomId(req.fromId, req.toId);
           if (!net.peerChats[roomId]) {
@@ -5849,6 +5888,7 @@
         registerCurrentUserInDirectory();
         await pushUserToSupabase();
         broadcastProfileFast();
+        startSupaPolling();
         logUserActivityToSupabase('signup');
         authState.authError = '';
         render();
@@ -5904,8 +5944,12 @@
         logUserActivityToSupabase('login');
         authState.authError = '';
         lastSyncedNetDigest = '';
+        lastSupaMsgCreatedAt = 0;
+        supaSyncTickCount = 0;
         render();
         syncFromNetwork();
+        startSupaPolling();
+        syncWithSupabase(true);
         fetchLiveStats(true); refreshDynamicTurnServers();
         try { const _c = getSupaCfg(); if (_c && _c.url) fetch(_c.url + '/functions/v1/shavlo-sync', { method: 'GET' }).catch(() => {}); } catch (_) {}
         try { const net = getNetwork(); Object.keys(net.directory || {}).forEach(pid => { if (pid !== activeVaultId) deriveRoomAesKey(makeRoomId(activeVaultId, pid)); }); } catch (_) {}
@@ -5935,6 +5979,8 @@
       function logoutVault() {
         logUserActivityToSupabase('logout');
         lastSyncedNetDigest = '';
+        lastSupaMsgCreatedAt = 0;
+        supaSyncTickCount = 0;
         stopSupaPolling();
         stopLocalCamera();
         clearTimeout(statusAutoTimer);
@@ -7474,7 +7520,7 @@
         const r = 29;
         const c = 2 * Math.PI * r;
         if (n === 1) {
-          const strokeCls = states[0] ? 'stroke-zinc-300 dark:stroke-zinc-700' : 'stroke-[#09090C] dark:stroke-white';
+          const strokeCls = states[0] ? 'stroke-zinc-300' : 'stroke-[#3F89F6]';
           return `<svg viewBox="0 0 64 64" class="pointer-events-none absolute -inset-[4px] w-[64px] h-[64px]" aria-hidden="true"><circle cx="32" cy="32" r="${r}" fill="none" stroke-width="2.6" class="${strokeCls}"/></svg>`;
         }
         const gap = n >= 8 ? 4.5 : (n >= 4 ? 5.5 : 6.5);
@@ -7482,7 +7528,7 @@
         const step = dash + gap;
         const arcs = states.map((segSeen, i) => {
           const offset = -(i * step);
-          const strokeCls = segSeen ? 'stroke-zinc-300 dark:stroke-zinc-700' : 'stroke-[#09090C] dark:stroke-white';
+          const strokeCls = segSeen ? 'stroke-zinc-300' : 'stroke-[#3F89F6]';
           return `<circle cx="32" cy="32" r="${r}" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="${dash.toFixed(2)} ${(c - dash).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" class="${strokeCls}"/>`;
         }).join('');
         return `<svg viewBox="0 0 64 64" style="transform:rotate(-90deg);" class="pointer-events-none absolute -inset-[4px] w-[64px] h-[64px]" aria-hidden="true">${arcs}</svg>`;
@@ -8018,10 +8064,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         ${(ui.ringPingChats && ui.ringPingChats[chat.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
                         <div id="plus-ring-inner" class="relative ${isOnlineNow ? 'online-plus-ring' : ''} rounded-full">
                           <svg id="plus-ring-solid" class="ring-second-layer ${(isInChatNow && !isTypingNow) ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
-                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2"/>
+                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#3F89F6" stroke-width="3.2"/>
                           </svg>
                           <svg id="plus-ring-dotted" class="ring-second-layer ring-second-dotted ${(isInChatNow && isTypingNow) ? 'opacity-100' : 'opacity-0 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
-                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
+                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#3F89F6" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
                           </svg>
                           <button id="chat-plus-btn" type="button" data-action="toggle-attach" title="Tap for menu • Double-tap for timer" class="${isPrivateMode ? 'glass-dark-pill text-white' : (ui.attachMenuOpen ? 'bg-ink text-white dark:bg-white dark:text-ink' : 'soft-bw-glass text-ink dark:text-white')} ${isOnlineNow ? 'w-[38px] h-[38px]' : 'w-12 h-12'} rounded-full flex items-center justify-center select-none">
                             ${icon(ui.attachMenuOpen ? 'close' : 'plus', 'w-[22px] h-[22px]')}
@@ -11853,7 +11899,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             const frId = 'fr_' + Date.now();
             const sinceTxt = nowTime();
             net.friendships.push({ id: frId, users: [activeVaultId, uid], since: sinceTxt });
-            supaWriteReliable('shavlo_friendships', 'POST', '', { id: frId, user_a: activeVaultId, user_b: uid, since: sinceTxt });
+            supaWriteReliable('shavlo_friendships', 'POST', '?on_conflict=id', { id: frId, user_a: activeVaultId, user_b: uid, since: sinceTxt });
           }
           const roomId = makeRoomId(activeVaultId, uid);
           saveNetwork(net, 'world_dm');
