@@ -1,7 +1,7 @@
 // shavlo Service Worker — Offline Shell Cache + Rich Web Push + Quick Reply + Background Sync
-const CACHE_NAME = 'shavlo-shell-v233';
+const CACHE_NAME = 'shavlo-shell-v240';
 const MEDIA_CACHE = 'shavlo-media-cache-v1';
-const SHELL_ASSETS = ['./', './index.html', './manifest.webmanifest'];
+const SHELL_ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -72,6 +72,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'shavlo', {
       body: data.body || 'New activity',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
       tag: roomTag,
       renotify: true,
       vibrate: data.isCall ? [220, 120, 220, 120, 220] : [90, 40, 90],

@@ -11,9 +11,15 @@
   "theme_color": "#09090C",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='44' fill='%2309090C'/%3E%3Ctext x='96' y='122' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='800' font-size='88' fill='%23FAFAFC'%3Es%3C/text%3E%3Ccircle cx='144' cy='124' r='11' fill='%23C6A76D'/%3E%3C/svg%3E",
+      "src": "./icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ],

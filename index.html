@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>shavlo — Private Messages, Calls &amp; UPI</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="preload" href="https://cdn.tailwindcss.com/3.4.17" as="script" />
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.47.10/dist/umd/supabase.min.js"></script>
@@ -1770,6 +1773,7 @@
         const chats = getMergedChats();
         const chat = chats.find(c => c.id === roomId);
         if (chat && isChatMuted(chat)) return;
+        if (state && state.security && state.security.dndUntil && Number(state.security.dndUntil) > Date.now()) return;
         const isViewingThisChat = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === roomId && (window.innerWidth >= 768 || state.mobileView === 'chat'));
         if (isViewingThisChat) {
           playSubtleTone('ping');
@@ -1777,7 +1781,14 @@
           return;
         }
         const title = senderName || (chat ? chat.name : 'New Message');
-        const body = msg.type === 'image' ? 'Sent a photo' : (msg.type === 'video' ? 'Sent a video' : (msg.type === 'voice' ? 'Sent a voice note' : (msg.type === 'document' ? ('Sent ' + (msg.fileName || 'a document')) : (msg.text || 'New message'))));
+        const body = msg.type === 'image' ? 'Sent a photo'
+          : msg.type === 'video' ? 'Sent a video'
+          : msg.type === 'voice' ? 'Sent a voice note'
+          : msg.type === 'document' ? ('Sent ' + (msg.fileName || 'a document'))
+          : msg.type === 'upi' ? (`Sent ₹${Number(msg.amount || 0)}${msg.note ? ' • ' + msg.note : ''}`)
+          : msg.type === 'request' ? (`Requested ₹${Number(msg.amount || 0)}${msg.note ? ' • ' + msg.note : ''}`)
+          : msg.type === 'split' ? (`Split bill: ${msg.title || 'Group expense'} (₹${Number(msg.total || 0)})`)
+          : (msg.text || 'New message');
         const _npCheck = (state && state.security && state.security.notifPrefs) || {};
         const _mCat = (msg.type === 'image' || msg.type === 'video') ? 'media' : (msg.type === 'voice' ? 'audio' : 'messages');
         if (_npCheck[_mCat] === false) return;
@@ -1792,26 +1803,39 @@
       function showSystemNotif(title, body, tag, roomId) {
         try {
           if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+          const opts = {
+            body: body || '',
+            tag: tag || 'shavlo-alert',
+            icon: './icon-192.png',
+            badge: './icon-192.png',
+            renotify: true,
+            data: { url: roomId ? ('./?chat=' + encodeURIComponent(roomId)) : './', roomId: roomId || '' }
+          };
+          const showFallback = () => {
+            try {
+              const n = new Notification(title || 'shavlo', { body: opts.body, tag: opts.tag, icon: opts.icon });
+              n.onclick = () => {
+                try { window.focus(); } catch (_) {}
+                if (state && roomId) {
+                  state.activeNav = 'messages';
+                  state.selectedChatId = roomId;
+                  state.mobileView = 'chat';
+                  render();
+                  scrollToBottom();
+                }
+              };
+            } catch (_) {}
+          };
           if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
             navigator.serviceWorker.ready.then((reg) => {
               if (reg && typeof reg.showNotification === 'function') {
-                reg.showNotification(title || 'shavlo', { body: body || '', tag: tag || 'shavlo-alert', renotify: true }).catch(() => {});
+                reg.showNotification(title || 'shavlo', opts).catch(showFallback);
               } else {
-                new Notification(title || 'shavlo', { body: body || '', tag: tag || 'shavlo-alert' });
+                showFallback();
               }
-            }).catch(() => {});
+            }).catch(showFallback);
           } else {
-            const n = new Notification(title || 'shavlo', { body: body || '', tag: tag || 'shavlo-alert' });
-            n.onclick = () => {
-              try { window.focus(); } catch (_) {}
-              if (state && roomId) {
-                state.activeNav = 'messages';
-                state.selectedChatId = roomId;
-                state.mobileView = 'chat';
-                render();
-                scrollToBottom();
-              }
-            };
+            showFallback();
           }
         } catch (e) {}
       }
@@ -2121,7 +2145,7 @@
           const keyArr = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) keyArr[i] = raw.charCodeAt(i);
           const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyArr });
-          supaWriteReliable('shavlo_push_subs', 'POST', '', { vault_id: activeVaultId, subscription: sub.toJSON(), updated_at: Date.now() });
+          supaWriteReliable('shavlo_push_subs', 'POST', '?on_conflict=vault_id', { vault_id: activeVaultId, subscription: sub.toJSON(), updated_at: Date.now() });
           return true;
         } catch (e) { return false; }
       }
@@ -2216,23 +2240,42 @@
         fetch(`${cfg.url}/storage/v1/object/shavlo-media/${objPath}`, { method: 'DELETE', headers }).catch(() => {});
       }
 
+      function getRoomMaxIncomingTs(net, roomId) {
+        const list = (net && net.peerChats && net.peerChats[roomId]) || [];
+        let maxTs = 0;
+        for (let i = 0; i < list.length; i++) {
+          const m = list[i];
+          if (m && m.authorId !== activeVaultId) {
+            const t = Number(m.createdAt || 0);
+            if (t > maxTs) maxTs = t;
+          }
+        }
+        return maxTs;
+      }
+
       function markRoomDelivered(roomId) {
         if (!roomId || !activeVaultId || !state) return;
         const net = getNetwork();
         net.deliveredReceipts = net.deliveredReceipts || {};
         net.deliveredReceipts[roomId] = net.deliveredReceipts[roomId] || {};
-        const nowD = Date.now();
-        if (nowD - (net.deliveredReceipts[roomId][activeVaultId] || 0) < 400) return;
-        net.deliveredReceipts[roomId][activeVaultId] = nowD;
+        const maxInc = getRoomMaxIncomingTs(net, roomId);
+        const nowD = Math.max(Date.now(), maxInc + 1);
+        const prevD = net.deliveredReceipts[roomId][activeVaultId] || 0;
+        if (nowD <= prevD && (Date.now() - prevD) < 400) return;
+        net.deliveredReceipts[roomId][activeVaultId] = Math.max(prevD, nowD);
         saveNetwork(net, 'delivered_receipt');
+        const existingRead = (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][activeVaultId]) || 0;
         const rrRow = {
-          room_id: roomId, user_id: activeVaultId, last_delivered_at: nowD,
-          last_read_at: (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][activeVaultId]) || 0
+          room_id: roomId, user_id: activeVaultId,
+          last_delivered_at: net.deliveredReceipts[roomId][activeVaultId],
+          last_read_at: existingRead
         };
-        if (supaRealtimeChan) {
-          try { supaRealtimeChan.send({ type: 'broadcast', event: 'rr_fast', payload: rrRow }); } catch (_) {}
-        }
-        supaWriteReliable('shavlo_read_receipts', 'POST', '', rrRow);
+        sendRoomBroadcast(roomId, 'rr_fast', rrRow);
+        supaFetch('rpc/shavlo_upsert_read_receipt', 'POST', '', {
+          p_room_id: roomId, p_user_id: activeVaultId, p_is_read: false, p_min_ts: rrRow.last_delivered_at
+        }).catch(() => {
+          supaWriteReliable('shavlo_read_receipts', 'POST', '?on_conflict=room_id,user_id', rrRow);
+        });
       }
 
       function markRoomRead(roomId) {
@@ -2240,17 +2283,20 @@
         const net = getNetwork();
         net.readReceipts = net.readReceipts || {};
         net.readReceipts[roomId] = net.readReceipts[roomId] || {};
-        net.readReceipts[roomId][activeVaultId] = Date.now();
-        saveNetwork(net, 'read_receipt');
-        const ts = net.readReceipts[roomId][activeVaultId];
+        const maxInc = getRoomMaxIncomingTs(net, roomId);
+        const ts = Math.max(Date.now(), maxInc + 1, (net.readReceipts[roomId][activeVaultId] || 0));
+        net.readReceipts[roomId][activeVaultId] = ts;
         net.deliveredReceipts = net.deliveredReceipts || {};
         net.deliveredReceipts[roomId] = net.deliveredReceipts[roomId] || {};
-        net.deliveredReceipts[roomId][activeVaultId] = ts;
+        net.deliveredReceipts[roomId][activeVaultId] = Math.max(net.deliveredReceipts[roomId][activeVaultId] || 0, ts);
+        saveNetwork(net, 'read_receipt');
         const rrReadRow = { room_id: roomId, user_id: activeVaultId, last_delivered_at: ts, last_read_at: ts };
-        if (supaRealtimeChan) {
-          try { supaRealtimeChan.send({ type: 'broadcast', event: 'rr_fast', payload: rrReadRow }); } catch (_) {}
-        }
-        supaWriteReliable('shavlo_read_receipts', 'POST', '', rrReadRow);
+        sendRoomBroadcast(roomId, 'rr_fast', rrReadRow);
+        supaFetch('rpc/shavlo_upsert_read_receipt', 'POST', '', {
+          p_room_id: roomId, p_user_id: activeVaultId, p_is_read: true, p_min_ts: ts
+        }).catch(() => {
+          supaWriteReliable('shavlo_read_receipts', 'POST', '?on_conflict=room_id,user_id', rrReadRow);
+        });
       }
 
       async function loadOlderMessages(roomId) {
@@ -2775,7 +2821,7 @@
             }
           }
         } catch (_) {}
-        supaWriteReliable('shavlo_users', 'POST', '', {
+        const userRow = {
           vault_id: activeVaultId,
           friend_code: state.userProfile.friendCode,
           name: state.userProfile.name,
@@ -2785,6 +2831,10 @@
           pub_key: (await ensureMyEcdhKeys())?.pubJwk || null,
           updated_at: Date.now(),
           last_seen_at: Date.now()
+        };
+        supaFetch('shavlo_users', 'POST', '?on_conflict=vault_id', userRow).catch(() => {
+          const { last_seen_at, ...fallbackRow } = userRow;
+          supaWriteReliable('shavlo_users', 'POST', '?on_conflict=vault_id', fallbackRow);
         });
         try {
           let devId = localStorage.getItem('shavlo_device_id_v1');
@@ -2908,7 +2958,7 @@
 
           const vidEnc = encodeURIComponent(activeVaultId);
           const [users, reqs, friends, groups, msgsRaw, statuses, statusViewsRows, calls, readReceipts, upiTxns, upiContactsRows, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
-            fetchUsers ? supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at') : Promise.resolve(null),
+            fetchUsers ? supaFetch('rpc/shavlo_get_contacts_profiles', 'POST', '', { p_vault_id: activeVaultId }).catch(() => supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at,last_seen_at')) : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=id,from_id,from_name,from_code,to_id,to_name,to_code,created_time&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
             supaFetch('shavlo_groups', 'GET', '?select=id,code,name,description,creator_id,member_ids,admin_ids,created_at,expires_at'),
@@ -2931,18 +2981,28 @@
           }
 
           const net = getNetwork();
+          let directoryUpdated = false;
+          const mergeDirUser = (u) => {
+            if (!u || !u.vault_id) return;
+            const prev = net.directory[u.vault_id];
+            const nextObj = {
+              vaultId: u.vault_id,
+              friendCode: u.friend_code || (prev && prev.friendCode) || '',
+              name: (u.name && u.name.trim()) ? u.name.trim() : ((prev && prev.name) || 'Friend'),
+              upiId: u.upi_id || (prev && prev.upiId) || '',
+              avatarText: u.avatar_text || getInitial(u.name || (prev && prev.name) || 'F'),
+              avatarUrl: u.avatar_url || (prev && prev.avatarUrl) || '',
+              pubKey: u.pub_key || (prev && prev.pubKey) || null,
+              lastSeen: u.last_seen_at || u.updated_at || (prev && prev.lastSeen) || Date.now()
+            };
+            if (!prev || prev.name !== nextObj.name || prev.avatarUrl !== nextObj.avatarUrl || prev.upiId !== nextObj.upiId) {
+              directoryUpdated = true;
+            }
+            net.directory[u.vault_id] = nextObj;
+          };
           if (Array.isArray(users) && users.length > 0) { const maxU = Math.max(...users.map(u => Number(u.updated_at || 0))); if (maxU > lastUserSyncAt) lastUserSyncAt = maxU; }
           (users || []).forEach(u => {
-            net.directory[u.vault_id] = {
-              vaultId: u.vault_id,
-              friendCode: u.friend_code,
-              name: u.name,
-              upiId: u.upi_id || '',
-              avatarText: u.avatar_text || getInitial(u.name),
-              avatarUrl: u.avatar_url || '',
-              pubKey: u.pub_key || null,
-              lastSeen: u.updated_at || Date.now()
-            };
+            mergeDirUser(u);
             if (u.vault_id === activeVaultId && Number(u.updated_at || 0) > Number(state.userProfile.avatarUpdatedAt || 0) + 2500) {
               const nextAv = u.avatar_url || '';
               const nextNm = (u.name || '').trim();
@@ -2974,6 +3034,18 @@
             createdAt: g.created_at || Date.now(),
             expiresAt: g.expires_at ? Number(g.expires_at) : null
           }));
+          // Backfill any offline friend or group member missing from local directory
+          const neededIds = new Set();
+          net.friendships.forEach(f => (f.users || []).forEach(id => { if (id && id !== activeVaultId && (!net.directory[id] || net.directory[id].name === 'Friend')) neededIds.add(id); }));
+          net.groups.forEach(g => (g.memberIds || []).forEach(id => { if (id && id !== activeVaultId && (!net.directory[id] || net.directory[id].name === 'Friend')) neededIds.add(id); }));
+          if (neededIds.size > 0) {
+            const idList = Array.from(neededIds).slice(0, 60).map(id => `"${String(id).replace(/"/g, '')}"`).join(',');
+            const missingUsers = await supaFetch('shavlo_users', 'GET', `?vault_id=in.(${encodeURIComponent(idList)})&select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at,last_seen_at`).catch(() => []);
+            (Array.isArray(missingUsers) ? missingUsers : []).forEach(mergeDirUser);
+          }
+          if (directoryUpdated) {
+            try { localStorage.setItem(NETWORK_KEY, JSON.stringify(net)); } catch (_) {}
+          }
           const groupedMsgs = {};
           const nowMs = Date.now();
           for (const row of (msgs || [])) {
@@ -2987,12 +3059,22 @@
             }));
           }
           Object.keys(groupedMsgs).forEach(rid => {
-            const hasIncomingFromPeer = groupedMsgs[rid].some(m => m.authorId && m.authorId !== activeVaultId);
-            if (hasIncomingFromPeer) markRoomDelivered(rid);
             const existing = Array.isArray(net.peerChats[rid]) ? net.peerChats[rid] : [];
+            const prevIds = new Set(existing.map(m => m.id));
             const byId = new Map(existing.map(m => [m.id, m]));
-            groupedMsgs[rid].forEach(m => byId.set(m.id, Object.assign({}, byId.get(m.id) || {}, m)));
+            groupedMsgs[rid].forEach(m => {
+              const isBrandNew = !prevIds.has(m.id) && m.authorId && m.authorId !== activeVaultId;
+              byId.set(m.id, Object.assign({}, byId.get(m.id) || {}, m));
+              if (isBrandNew && !forceFull && supaSyncTickCount > 1) {
+                notifyIncomingMessage(m, m.authorName || 'New Message', rid);
+              }
+            });
             net.peerChats[rid] = Array.from(byId.values());
+            const hasIncomingFromPeer = groupedMsgs[rid].some(m => m.authorId && m.authorId !== activeVaultId);
+            if (hasIncomingFromPeer) {
+              const isOpenNow = (!document.hidden && state && state.activeNav === 'messages' && state.selectedChatId === rid && (window.innerWidth >= 768 || state.mobileView === 'chat'));
+              if (isOpenNow) markRoomRead(rid); else markRoomDelivered(rid);
+            }
           });
           if (statuses !== null) {
             const _recentLocalSt = (net.statuses || []).filter(s => s && s.id && (Date.now() - Number(s.createdAt || 0)) < 15000 && !(statuses || []).some(r => r.id === s.id));
@@ -3026,12 +3108,22 @@
 
           net.readReceipts = net.readReceipts || {};
           net.deliveredReceipts = net.deliveredReceipts || {};
+          let rrChanged = false;
           (readReceipts || []).forEach(rr => {
             net.readReceipts[rr.room_id] = net.readReceipts[rr.room_id] || {};
-            net.readReceipts[rr.room_id][rr.user_id] = Number(rr.last_read_at || 0);
+            const prevR = Number(net.readReceipts[rr.room_id][rr.user_id] || 0);
+            const nextR = Math.max(prevR, Number(rr.last_read_at || 0));
+            if (nextR > prevR) rrChanged = true;
+            net.readReceipts[rr.room_id][rr.user_id] = nextR;
             net.deliveredReceipts[rr.room_id] = net.deliveredReceipts[rr.room_id] || {};
-            net.deliveredReceipts[rr.room_id][rr.user_id] = Math.max(Number(rr.last_delivered_at || 0), Number(rr.last_read_at || 0));
+            const prevD = Number(net.deliveredReceipts[rr.room_id][rr.user_id] || 0);
+            const nextD = Math.max(prevD, Number(rr.last_delivered_at || 0), nextR);
+            if (nextD > prevD) rrChanged = true;
+            net.deliveredReceipts[rr.room_id][rr.user_id] = nextD;
           });
+          if (rrChanged) {
+            try { localStorage.setItem(NETWORK_KEY, JSON.stringify(net)); } catch (_) {}
+          }
           if (Array.isArray(upiTxns) && upiTxns.length > 0 && state) {
             state.upiHistory = state.upiHistory || [];
             const existingIds = new Set(state.upiHistory.map(t => t.id));
@@ -3555,9 +3647,15 @@
                       txnId: payload.id
                     });
                     persistCurrentVault();
-                    if (payload.status === 'remind') showToast(`${payload.senderName || 'Friend'} reminded you to pay ₹${Number(payload.amount || 0)}`);
-                    else if (payload.status === 'declined') showToast(`${payload.senderName || 'Friend'} declined ₹${Number(payload.amount || 0)} request`);
-                    else if (payload.status === 'confirmed_received') {
+                    if (payload.status === 'remind') {
+                      const msg = `${payload.senderName || 'Friend'} reminded you to pay ₹${Number(payload.amount || 0)}`;
+                      showToast(msg);
+                      showSystemNotif('UPI Reminder', msg, 'shavlo-upi-' + payload.id, payload.room_id || '');
+                    } else if (payload.status === 'declined') {
+                      const msg = `${payload.senderName || 'Friend'} declined ₹${Number(payload.amount || 0)} request`;
+                      showToast(msg);
+                      showSystemNotif('UPI Request Declined', msg, 'shavlo-upi-' + payload.id, payload.room_id || '');
+                    } else if (payload.status === 'confirmed_received') {
                       const net = getNetwork();
                       Object.values(net.peerChats || {}).forEach(list => {
                         const hit = (list || []).find(m => m.txnId === payload.id);
@@ -4570,7 +4668,16 @@
         const myFriendships = net.friendships.filter(f => f.users.includes(activeVaultId));
         const peerChats = myFriendships.map(f => {
           const otherId = f.users.find(id => id !== activeVaultId);
-          const other = net.directory[otherId] || { name: 'Friend', friendCode: 'SMV-PEER', upiId: 'friend@upi', avatarText: 'F' };
+          let other = net.directory[otherId];
+          if (!other || !other.name || other.name === 'Friend') {
+            const reqMatch = (net.requests || []).find(r => (r.fromId === otherId && r.fromName) || (r.toId === otherId && r.toName));
+            const reqName = reqMatch ? (reqMatch.fromId === otherId ? reqMatch.fromName : reqMatch.toName) : '';
+            const msgRoom = makeRoomId(activeVaultId, otherId);
+            const msgMatch = (net.peerChats && net.peerChats[msgRoom] || []).slice().reverse().find(m => m.authorId === otherId && m.authorName);
+            const stMatch = (net.statuses || []).find(s => s.authorId === otherId && s.authorName);
+            const resolvedName = (other && other.name && other.name !== 'Friend') ? other.name : (reqName || (msgMatch && msgMatch.authorName) || (stMatch && stMatch.authorName) || 'Friend');
+            other = Object.assign({ friendCode: 'SMV-PEER', upiId: 'friend@upi', avatarUrl: '' }, other || {}, { name: resolvedName, avatarText: getInitial(resolvedName) });
+          }
           const roomId = makeRoomId(activeVaultId, otherId);
           const peerReadAt = (net.readReceipts && net.readReceipts[roomId] && net.readReceipts[roomId][otherId]) || 0;
           const peerDelivAt = (net.deliveredReceipts && net.deliveredReceipts[roomId] && net.deliveredReceipts[roomId][otherId]) || 0;
@@ -4628,11 +4735,23 @@
               .filter(m => !m.expiresAt || m.expiresAt > nowMs)
               .map(m => {
                 const author = net.directory[m.authorId];
+                const isMine = m.authorId === activeVaultId;
+                let liveStatus = m.status;
+                if (isMine) {
+                  const ts = Number(m.createdAt || 0);
+                  const roomReads = (net.readReceipts && net.readReceipts[g.id]) || {};
+                  const roomDelivs = (net.deliveredReceipts && net.deliveredReceipts[g.id]) || {};
+                  const otherIds = (g.memberIds || []).filter(id => id && id !== activeVaultId);
+                  const anyRead = otherIds.some(id => Number(roomReads[id] || 0) > 0 && ts <= Number(roomReads[id] || 0));
+                  const anyDeliv = otherIds.some(id => Number(roomDelivs[id] || 0) > 0 && ts <= Number(roomDelivs[id] || 0));
+                  liveStatus = anyRead ? 'read' : (anyDeliv ? 'delivered' : (m.status || 'sent'));
+                }
                 return {
                   ...m,
+                  status: liveStatus,
                   text: m.text || '',
-                  sender: m.authorId === activeVaultId ? 'me' : 'other',
-                  senderName: m.authorId === activeVaultId ? 'You' : ((author && author.name) || m.authorName || 'Member')
+                  sender: isMine ? 'me' : 'other',
+                  senderName: isMine ? 'You' : ((author && author.name) || m.authorName || 'Member')
                 };
               });
             const lastMsg = rawMsgs[rawMsgs.length - 1];
@@ -9248,7 +9367,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <button type="button" data-action="upi-tab" data-tab="request" class="py-2 rounded-full text-[12.5px] font-semibold tracking-[-0.01em] transition ${ui.upiTab === 'request' ? 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C] shadow-sm' : 'text-muted'}">Request</button>
               <button type="button" data-action="upi-tab" data-tab="history" class="py-2 rounded-full text-[12.5px] font-semibold tracking-[-0.01em] transition ${ui.upiTab === 'history' ? 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C] shadow-sm' : 'text-muted'}">History</button>
             </div>
-            <div class="h-[372px] flex flex-col justify-between overflow-hidden">
+            <div class="min-h-[320px] flex flex-col justify-between">
             ${ui.upiTab === 'history' ? `
               <div class="flex-1 min-h-0 flex flex-col justify-between gap-3">
                 <div class="flex-1 min-h-0 overflow-y-auto thin-scroll space-y-2 pr-0.5">
@@ -9945,14 +10064,88 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
         const isBottomSheet = (ui.modal === 'photoPicker' || ui.modal === 'upi');
         root.innerHTML = `
-          <div data-action="close-modal-backdrop" class="fixed inset-0 z-50 bg-black/25 backdrop-blur-sm flex ${isBottomSheet ? 'items-end justify-center p-0 sm:items-center sm:p-4' : 'items-center justify-center p-4'} overflow-hidden">
+          <div id="modal-backdrop" data-action="close-modal-backdrop" style="transition: height 180ms cubic-bezier(0.22,1,0.36,1), top 180ms ease;" class="fixed inset-0 z-50 bg-black/25 backdrop-blur-sm flex ${isBottomSheet ? 'items-end justify-center p-0 sm:items-center sm:p-4' : 'items-center justify-center p-4'} overflow-hidden">
             <div class="glass-modal overflow-hidden ${isBottomSheet ? (isSameOpenModal ? '' : 'animate-slide-up ') + 'w-full max-w-lg rounded-t-[36px] rounded-b-none sm:rounded-[34px]' : (isSameOpenModal ? '' : 'glass-pop ') + 'w-[min(100%,420px)] max-w-full'}">
-              <div class="${isBottomSheet ? 'max-h-[78dvh] overflow-y-auto thin-scroll px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6' : 'max-h-[86dvh] overflow-y-auto thin-scroll p-5 sm:p-6'}">
+              <div id="modal-scroll-inner" class="${isBottomSheet ? 'max-h-[82dvh] overflow-y-auto thin-scroll px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6' : 'max-h-[86dvh] overflow-y-auto thin-scroll p-5 sm:p-6'}">
                 ${inner}
               </div>
             </div>
           </div>
         `;
+        syncModalToKeyboard();
+      }
+
+      function syncModalToKeyboard() {
+        const bd = document.getElementById('modal-backdrop');
+        const innerScroll = document.getElementById('modal-scroll-inner');
+        if (!bd) return;
+        const vv = window.visualViewport;
+        if (vv) {
+          if (window.scrollY !== 0 || window.scrollX !== 0) {
+            try { window.scrollTo(0, 0); } catch (_) {}
+          }
+          bd.style.top = Math.max(0, vv.offsetTop) + 'px';
+          bd.style.height = vv.height + 'px';
+          bd.style.bottom = 'auto';
+          if (innerScroll) {
+            const pad = window.innerWidth >= 640 ? 32 : 12;
+            innerScroll.style.maxHeight = Math.max(200, Math.floor(vv.height - pad)) + 'px';
+          }
+        }
+      }
+
+      function findScrollableAncestor(el) {
+        let cur = el ? el.parentElement : null;
+        while (cur && cur !== document.body) {
+          const st = window.getComputedStyle(cur);
+          if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && cur.scrollHeight > cur.clientHeight + 2) {
+            return cur;
+          }
+          cur = cur.parentElement;
+        }
+        return null;
+      }
+
+      function bringFocusedInputIntoView(el) {
+        if (!el || !el.tagName) return;
+        const tag = el.tagName.toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+        if (el.type === 'file' || el.type === 'checkbox' || el.type === 'radio' || el.type === 'hidden') return;
+        const doScroll = () => {
+          syncModalToKeyboard();
+          const vv = window.visualViewport;
+          const visTop = vv ? vv.offsetTop : 0;
+          const visBottom = visTop + (vv ? vv.height : window.innerHeight);
+          const rect = el.getBoundingClientRect();
+          const sp = findScrollableAncestor(el);
+          if (sp) {
+            const spRect = sp.getBoundingClientRect();
+            const safeBottom = Math.min(visBottom, spRect.bottom) - 14;
+            const safeTop = Math.max(visTop, spRect.top) + 14;
+            if (rect.bottom > safeBottom) {
+              sp.scrollBy({ top: rect.bottom - safeBottom, behavior: 'smooth' });
+            } else if (rect.top < safeTop) {
+              sp.scrollBy({ top: rect.top - safeTop, behavior: 'smooth' });
+            }
+          }
+        };
+        setTimeout(doScroll, 90);
+        setTimeout(doScroll, 280);
+      }
+
+      if (window.visualViewport && !window._shavloVvBound) {
+        window._shavloVvBound = true;
+        window.visualViewport.addEventListener('resize', () => {
+          syncModalToKeyboard();
+          if (document.activeElement) bringFocusedInputIntoView(document.activeElement);
+        });
+        window.visualViewport.addEventListener('scroll', syncModalToKeyboard);
+      }
+      if (!window._shavloFocusBound) {
+        window._shavloFocusBound = true;
+        document.addEventListener('focusin', (e) => {
+          bringFocusedInputIntoView(e.target);
+        });
       }
 
       function attachCallStreams() {
@@ -10294,11 +10487,16 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <!-- Header & Smooth Progress Bars -->
             <div class="relative z-20">
               <div class="flex gap-1.5 mb-4">
-                ${list.map((item, i) => `
-                  <div class="h-1 flex-1 rounded-full bg-white/30 overflow-hidden">
-                    <div class="h-full bg-white ${i < idx ? 'w-full' : (i === idx ? (animateBar ? 'w-full status-bar-fill' : 'w-full') : 'w-0')}"></div>
-                  </div>
-                `).join('')}
+                ${(() => {
+                  const uKey = st.isMine ? '__me__' : (st.authorId || st.authorName || 'user');
+                  const userList = list.filter(x => (x.isMine ? '__me__' : (x.authorId || x.authorName || 'user')) === uKey);
+                  const uIdx = Math.max(0, userList.findIndex(x => x.id === st.id));
+                  return userList.map((item, i) => `
+                    <div class="h-1 flex-1 rounded-full bg-white/30 overflow-hidden">
+                      <div class="h-full bg-white ${i < uIdx ? 'w-full' : (i === uIdx ? 'w-full status-bar-fill' : 'w-0')}"></div>
+                    </div>
+                  `).join('');
+                })()}
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2.5">
@@ -10327,7 +10525,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               const viewerList = getStatusViewerList(st);
               return `
                 <div class="relative z-20 mb-2 flex flex-col items-center">
-                  <button type="button" data-action="toggle-status-viewers" title="Viewed by" class="px-3.5 py-1.5 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-[13px] font-semibold text-white inline-flex items-center gap-1.5 transition">
+                  <button type="button" data-action="toggle-status-viewers" title="Viewed by" class="px-3.5 py-1.5 rounded-full bg-black/45 text-[13px] font-semibold text-white inline-flex items-center gap-1.5">
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                     <span id="status-viewers-count" class="tabular-nums">${viewerList.length}</span>
                   </button>
@@ -10336,7 +10534,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               `;
             })() : ''}
             <div class="relative z-20 flex items-center justify-center gap-2.5">
-              ${['❤️', '🔥', '😂'].map(em => `<button type="button" data-action="reply-status" data-id="${st.id}" data-emoji="${em}" class="w-10 h-10 rounded-full bg-black/35 hover:bg-black/60 backdrop-blur-md text-[17px] flex items-center justify-center transition">${em}</button>`).join('')}
+              ${['❤️', '🔥', '😂'].map(em => `<button type="button" data-action="reply-status" data-id="${st.id}" data-emoji="${em}" class="w-10 h-10 rounded-full bg-black/40 text-[17px] flex items-center justify-center">${em}</button>`).join('')}
             </div>
           </div>
         `;
@@ -10375,144 +10573,36 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
       }
 
-      function transitionStatusCube(dir, fromAngleDeg) {
-        if (statusCubeBusy || !ui.activeStatusId) return;
-        const list = getActiveStatuses();
+      function getGroupedActiveStatuses() {
+        const raw = getActiveStatuses();
+        const byUser = new Map();
+        raw.forEach(s => {
+          const k = s.isMine ? '__me__' : (s.authorId || s.authorName || 'user');
+          if (!byUser.has(k)) byUser.set(k, []);
+          byUser.get(k).push(s);
+        });
+        const ordered = [];
+        byUser.forEach(arr => arr.forEach(s => ordered.push(s)));
+        return ordered;
+      }
+
+      function transitionStatusCube(dir) {
+        if (!ui.activeStatusId) return;
+        const list = getGroupedActiveStatuses();
         const idx = list.findIndex(x => x.id === ui.activeStatusId);
-        const nextIdx = idx + dir;
+        const nextIdx = idx + (dir > 0 ? 1 : -1);
         if (nextIdx < 0) return;
+        clearTimeout(statusAutoTimer);
         if (nextIdx >= list.length) {
-          clearTimeout(statusAutoTimer);
           ui.activeStatusId = null;
           ui.statusViewersOpen = false;
           renderStatusViewer();
           render();
           return;
         }
-        const stage = document.getElementById('status-cube-stage');
-        if (!stage) {
-          ui.activeStatusId = list[nextIdx].id;
-          markStatusSeen(list[nextIdx].id);
-          renderStatusViewer();
-          return;
-        }
-        statusCubeBusy = true;
-        clearTimeout(statusAutoTimer);
-        const halfW = Math.round((stage.offsetWidth || 360) / 2);
-        const targetAngle = dir > 0 ? -90 : 90;
-        const startAngle = typeof fromAngleDeg === 'number' ? fromAngleDeg : 0;
-
-        // Ensure adjacent face is mounted at ±90deg
-        let sideFace = document.getElementById(dir > 0 ? 'status-face-next' : 'status-face-prev');
-        if (!sideFace) {
-          sideFace = document.createElement('div');
-          sideFace.id = dir > 0 ? 'status-face-next' : 'status-face-prev';
-          sideFace.className = 'status-cube-face';
-          sideFace.style.transform = `rotateY(${dir > 0 ? 90 : -90}deg) translateZ(${halfW}px)`;
-          sideFace.innerHTML = buildStatusFaceMarkup(list[nextIdx], nextIdx, list, false);
-          stage.appendChild(sideFace);
-        }
-        const curFace = document.getElementById('status-face-current');
-        if (curFace) curFace.style.transform = `rotateY(0deg) translateZ(${halfW}px)`;
-
-        stage.style.transition = 'none';
-        stage.style.transform = `translateZ(-${halfW}px) rotateY(${startAngle}deg)`;
-        void stage.offsetWidth;
-        stage.style.transition = 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)';
-        stage.style.transform = `translateZ(-${halfW}px) rotateY(${targetAngle}deg)`;
-
-        setTimeout(() => {
-          statusCubeBusy = false;
-          ui.activeStatusId = list[nextIdx].id;
-          markStatusSeen(list[nextIdx].id);
-          renderStatusViewer();
-        }, 430);
-      }
-
-      function attachStatusCubeSwipe(stage, idx, list) {
-        let startX = 0, startY = 0, dragX = 0, dragging = false, lockedHorizontal = false, startTs = 0;
-        const getHalfW = () => Math.round((stage.offsetWidth || 360) / 2);
-
-        const onStart = (x, y) => {
-          if (statusCubeBusy) return;
-          startX = x; startY = y; dragX = 0; dragging = true; lockedHorizontal = false; startTs = Date.now();
-          clearTimeout(statusAutoTimer);
-        };
-
-        const onMove = (x, y, ev) => {
-          if (!dragging || statusCubeBusy) return;
-          const dx = x - startX;
-          const dy = y - startY;
-          if (!lockedHorizontal) {
-            if (Math.abs(dx) < 8) return;
-            if (Math.abs(dy) > Math.abs(dx)) { dragging = false; return; }
-            lockedHorizontal = true;
-          }
-          if (ev && ev.cancelable) ev.preventDefault();
-          dragX = dx;
-          const halfW = getHalfW();
-          const maxAngle = 82;
-          // Dampen at edges when no prev/next exists
-          const atEdge = (dx < 0 && idx >= list.length - 1) || (dx > 0 && idx === 0);
-          const rawAngle = (dx / (halfW * 2)) * 90;
-          const angle = Math.max(-maxAngle, Math.min(maxAngle, atEdge ? rawAngle * 0.25 : rawAngle));
-
-          const curFace = document.getElementById('status-face-current');
-          if (curFace) curFace.style.transform = `rotateY(0deg) translateZ(${halfW}px)`;
-
-          if (dx < 0 && idx < list.length - 1 && !document.getElementById('status-face-next')) {
-            const nf = document.createElement('div');
-            nf.id = 'status-face-next';
-            nf.className = 'status-cube-face';
-            nf.style.transform = `rotateY(90deg) translateZ(${halfW}px)`;
-            nf.innerHTML = buildStatusFaceMarkup(list[idx + 1], idx + 1, list, false);
-            stage.appendChild(nf);
-          } else if (dx > 0 && idx > 0 && !document.getElementById('status-face-prev')) {
-            const pf = document.createElement('div');
-            pf.id = 'status-face-prev';
-            pf.className = 'status-cube-face';
-            pf.style.transform = `rotateY(-90deg) translateZ(${halfW}px)`;
-            pf.innerHTML = buildStatusFaceMarkup(list[idx - 1], idx - 1, list, false);
-            stage.appendChild(pf);
-          }
-
-          stage.style.transition = 'none';
-          stage.style.transform = `translateZ(-${halfW}px) rotateY(${angle}deg)`;
-        };
-
-        const onEnd = () => {
-          if (!dragging) return;
-          dragging = false;
-          const halfW = getHalfW();
-          const dt = Math.max(1, Date.now() - startTs);
-          const velocity = Math.abs(dragX) / dt;
-          const curAngle = Math.max(-82, Math.min(82, (dragX / (halfW * 2)) * 90));
-
-          if (lockedHorizontal && (Math.abs(dragX) > 48 || (Math.abs(dragX) > 20 && velocity > 0.35))) {
-            if (dragX < 0 && idx < list.length - 1) {
-              transitionStatusCube(1, curAngle);
-              return;
-            }
-            if (dragX > 0 && idx > 0) {
-              transitionStatusCube(-1, curAngle);
-              return;
-            }
-          }
-          // Spring cleanly back to 0deg
-          if (lockedHorizontal) {
-            stage.style.transition = 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1)';
-            stage.style.transform = `translateZ(-${halfW}px) rotateY(0deg)`;
-          }
-        };
-
-        stage.addEventListener('touchstart', (e) => {
-          if (e.touches && e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY);
-        }, { passive: true });
-        stage.addEventListener('touchmove', (e) => {
-          if (e.touches && e.touches.length === 1) onMove(e.touches[0].clientX, e.touches[0].clientY, e);
-        }, { passive: false });
-        stage.addEventListener('touchend', onEnd, { passive: true });
-        stage.addEventListener('touchcancel', onEnd, { passive: true });
+        ui.activeStatusId = list[nextIdx].id;
+        markStatusSeen(list[nextIdx].id);
+        renderStatusViewer();
       }
 
       let _mountedStatusId = '';
@@ -10526,7 +10616,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           if (root.innerHTML !== '') root.innerHTML = '';
           return;
         }
-        const list = getActiveStatuses();
+        const list = getGroupedActiveStatuses();
         const idx = list.findIndex(x => x.id === ui.activeStatusId);
         if (idx === -1) {
           clearTimeout(statusAutoTimer);
@@ -10536,7 +10626,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           return;
         }
         const st = list[idx];
-        if (_mountedStatusId === st.id && document.getElementById('status-cube-stage')) {
+        if (_mountedStatusId === st.id && document.getElementById('status-stage-flat')) {
           updateStatusViewersInPlace();
           return;
         }
@@ -10548,27 +10638,33 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
 
         root.innerHTML = `
-          <div data-action="close-status-backdrop" class="status-cube-scene fixed inset-0 z-[75] bg-black flex items-center justify-center p-0 overflow-hidden">
-            <div id="status-cube-stage" class="status-cube-stage">
-              <div id="status-face-current" class="status-cube-face">
-                ${buildStatusFaceMarkup(st, idx, list, true)}
-              </div>
+          <div data-action="close-status-backdrop" class="fixed inset-0 z-[75] bg-black flex items-center justify-center p-0 overflow-hidden">
+            <div id="status-stage-flat" class="w-full h-full flex items-center justify-center">
+              ${buildStatusFaceMarkup(st, idx, list, true)}
             </div>
           </div>
         `;
 
-        const stage = document.getElementById('status-cube-stage');
+        const stage = document.getElementById('status-stage-flat');
         if (stage) {
-          const halfW = Math.round((stage.offsetWidth || 360) / 2);
-          const curFace = document.getElementById('status-face-current');
-          if (curFace) curFace.style.transform = `rotateY(0deg) translateZ(${halfW}px)`;
-          stage.style.transform = `translateZ(-${halfW}px) rotateY(0deg)`;
-          attachStatusCubeSwipe(stage, idx, list);
+          let sx = 0, sy = 0;
+          stage.addEventListener('touchstart', (e) => {
+            if (e.touches && e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }
+          }, { passive: true });
+          stage.addEventListener('touchend', (e) => {
+            if (!e.changedTouches || !e.changedTouches.length) return;
+            const dx = e.changedTouches[0].clientX - sx;
+            const dy = e.changedTouches[0].clientY - sy;
+            if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
+              ui.statusViewersOpen = false;
+              transitionStatusCube(dx < 0 ? 1 : -1);
+            }
+          }, { passive: true });
         }
 
         statusAutoTimer = setTimeout(() => {
-          if (!ui.activeStatusId || statusCubeBusy || ui.statusViewersOpen) return;
-          transitionStatusCube(1, 0);
+          if (!ui.activeStatusId || ui.statusViewersOpen) return;
+          transitionStatusCube(1);
         }, 5000);
       }
 
