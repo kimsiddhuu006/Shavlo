@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
@@ -97,13 +97,17 @@
         0 4px 16px -4px rgba(0, 0, 0, 0.12),
         0 1px 3px rgba(0, 0, 0, 0.06);
     }
+    .dark body {
+      background-color: #09090C !important;
+      color: #FAFAFC;
+    }
     .dark .glass-pill {
-      background: linear-gradient(180deg, rgba(44, 44, 50, 0.72) 0%, rgba(24, 24, 28, 0.56) 100%);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: linear-gradient(155deg, rgba(28, 28, 38, 0.86) 0%, rgba(18, 18, 24, 0.78) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.16);
       box-shadow:
-        inset 0 1px 1px rgba(255, 255, 255, 0.24),
-        inset 0 -1px 2px rgba(0, 0, 0, 0.35),
-        0 6px 20px -4px rgba(0, 0, 0, 0.62);
+        inset 0 1px 1px rgba(255, 255, 255, 0.2),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.4),
+        0 8px 24px -6px rgba(0, 0, 0, 0.65);
     }
     @keyframes dottedSpin { to { transform: rotate(360deg); } }
     .profile-dotted-ring {
@@ -2915,7 +2919,7 @@
           let devId = localStorage.getItem('shavlo_device_id_v1');
           if (!devId) { devId = 'dev_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('shavlo_device_id_v1', devId); }
           const devName = /iPhone|iPad/i.test(navigator.userAgent || '') ? 'iPhone / iPad' : (/Android/i.test(navigator.userAgent || '') ? 'Android' : 'Web Browser');
-          supaWriteReliable('shavlo_sessions', 'POST', '', { id: devId, vault_id: activeVaultId, device_name: devName, last_active: Date.now() });
+          supaWriteReliable('shavlo_sessions', 'POST', '?on_conflict=id', { id: devId, vault_id: activeVaultId, device_name: devName, last_active: Date.now() });
         } catch (_) {}
       }
 
@@ -5023,7 +5027,7 @@
                 });
               } catch (_) {}
             }
-            supaWriteReliable('shavlo_statuses', 'POST', '', {
+            supaWriteReliable('shavlo_statuses', 'POST', '?on_conflict=id', {
               id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name,
               payload: stObj, expires_at: stObj.expiresAt
             });
@@ -5176,8 +5180,8 @@
       }
 
       function syncTheme() {
-        if (state) state.darkMode = false;
-        document.documentElement.classList.remove('dark');
+        if (state) state.darkMode = true;
+        document.documentElement.classList.add('dark');
       }
 
       function icon(name, cls = 'w-5 h-5') {
@@ -5268,11 +5272,11 @@
         if (supaRealtimeChan) {
           try { supaRealtimeChan.send({ type: 'broadcast', event: 'group_fast', payload: grpRow }); } catch (_) {}
         }
-        supaWriteReliable('shavlo_groups', 'POST', '', grpRow);
+        supaWriteReliable('shavlo_groups', 'POST', '?on_conflict=id', grpRow);
         ui.groupTimerOn = false;
         const initGrpMsg = net.peerChats[gid][0];
         if (initGrpMsg) {
-          supaWriteReliable('shavlo_messages', 'POST', '', {
+          supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
             id: initGrpMsg.id, room_id: gid, author_id: activeVaultId,
             author_name: state.userProfile.name, payload: initGrpMsg, created_at: Date.now()
           });
@@ -5325,7 +5329,7 @@
           net.peerChats[grp.id].push(joinMsg);
           saveNetwork(net, 'group_joined');
           supaWriteReliable('shavlo_groups', 'PATCH', `?id=eq.${encodeURIComponent(grp.id)}`, { member_ids: grp.memberIds });
-          supaWriteReliable('shavlo_messages', 'POST', '', {
+          supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
             id: joinMsg.id, room_id: grp.id, author_id: activeVaultId,
             author_name: state.userProfile.name, payload: joinMsg, created_at: Date.now()
           });
@@ -5461,7 +5465,7 @@
         net.requests.splice(idx, 1);
 
         if (accept) {
-          const frId = 'fr_' + Date.now();
+          const frId = 'fr_' + makeRoomId(req.fromId, req.toId);
           const sinceTxt = nowTime();
           if (!net.friendships.some(f => f.users.includes(req.fromId) && f.users.includes(req.toId))) {
             net.friendships.push({ id: frId, users: [req.fromId, req.toId], since: sinceTxt });
@@ -5502,7 +5506,7 @@
               starred: false
             };
             net.peerChats[roomId] = [welcomeMsg];
-            supaWriteReliable('shavlo_messages', 'POST', '', {
+            supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
               id: welcomeMsg.id, room_id: roomId, author_id: activeVaultId,
               author_name: state.userProfile.name, payload: welcomeMsg, created_at: Date.now()
             });
@@ -5734,7 +5738,7 @@
             callee_id: chat.peerVaultId, callee_name: chat.name, call_type: type,
             status: 'ringing', started_at: Date.now()
           };
-          supaWriteReliable('shavlo_calls', 'POST', '', _callRow);
+          supaWriteReliable('shavlo_calls', 'POST', '?on_conflict=room_id', _callRow);
           sendRoomBroadcast(chat.id, 'call_ring_fast', _callRow);
           setTimeout(() => { if (ui.activeCall && ui.activeCall.roomId === chat.id && ui.activeCall.status === 'ringing') sendRoomBroadcast(chat.id, 'call_ring_fast', _callRow); }, 350);
           ui.activeCall = {
@@ -6087,13 +6091,13 @@
               if (supaRealtimeChan) {
                 try { supaRealtimeChan.send({ type: 'broadcast', event: 'peer_msg', payload: encRow }); } catch (_) {}
               }
-              supaWriteReliable('shavlo_messages', 'POST', '', encRow);
+              supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', encRow);
             });
           } else {
             if (supaRealtimeChan) {
               try { supaRealtimeChan.send({ type: 'broadcast', event: 'peer_msg', payload: msgRow }); } catch (_) {}
             }
-            supaWriteReliable('shavlo_messages', 'POST', '', msgRow);
+            supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', msgRow);
           }
         } else {
           const targetChat = state.chats.find(x => x.id === chat.id) || chat;
@@ -6577,7 +6581,7 @@
         const noteText = (note || 'UPI Payment').trim();
         const upiUri = buildUpiPayUri(receiverUpi, receiverName, num, noteText, txnId);
         if (chat && chat.isPeer && activeVaultId) {
-          supaWriteReliable('shavlo_upi_txns', 'POST', '', {
+          supaWriteReliable('shavlo_upi_txns', 'POST', '?on_conflict=id', {
             id: txnId,
             room_id: chat.id,
             sender_id: activeVaultId,
@@ -6659,7 +6663,7 @@
             receipt_sig: receiptSig,
             created_at: nowTs
           };
-          supaWriteReliable('shavlo_upi_txns', 'POST', '', settledRow);
+          supaWriteReliable('shavlo_upi_txns', 'POST', '?on_conflict=id', settledRow);
           supaWriteReliable('shavlo_upi_events', 'POST', '', { id: 'evt_' + p.txnId + '_' + nowTs, txn_id: p.txnId, actor_id: activeVaultId, event_type: 'settled', meta: { utr: cleanUtr }, created_at: nowTs });
           sendRoomBroadcast(chat.id, 'upi_fast', Object.assign({}, settledRow, { senderName: (state.userProfile && state.userProfile.name) || 'Friend', upiId: p.receiverUpi }));
         }
@@ -6767,7 +6771,7 @@
         };
         pushMessageToChat(chat, msg);
         if (chat.isPeer && activeVaultId) {
-          supaWriteReliable('shavlo_upi_txns', 'POST', '', {
+          supaWriteReliable('shavlo_upi_txns', 'POST', '?on_conflict=id', {
             id: txnId || ('tx_' + Date.now()),
             room_id: chat.id,
             sender_id: activeVaultId,
@@ -6845,7 +6849,7 @@
         render();
         scrollToBottom();
         if (chat.isPeer && activeVaultId) {
-          supaWriteReliable('shavlo_upi_txns', 'POST', '', {
+          supaWriteReliable('shavlo_upi_txns', 'POST', '?on_conflict=id', {
             id: 'REQ_' + Date.now(), room_id: chat.id, sender_id: activeVaultId,
             receiver_id: chat.peerVaultId || '', amount: num, note: (note || 'Payment Request').trim(),
             status: 'pending', tx_type: 'request', created_at: Date.now()
@@ -7064,7 +7068,7 @@
           };
           privateRoomSession.messages.push(sysMsg);
           savePrivateRoomMessages(code, privateRoomSession.messages);
-          supaWriteReliable('shavlo_messages', 'POST', '', {
+          supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
             id: sysMsg.id, room_id: roomId, author_id: 'system',
             author_name: 'Room', payload: sysMsg, created_at: Date.now()
           });
@@ -7113,7 +7117,7 @@
         if (supaRealtimeChan) {
           try { supaRealtimeChan.send({ type: 'broadcast', event: 'priv_room_msg', payload: { code: privateRoomSession.code, msg } }); } catch (e) {}
         }
-        supaWriteReliable('shavlo_messages', 'POST', '', {
+        supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
           id: msg.id, room_id: privateRoomSession.roomId, author_id: privateRoomSession.guestId,
           author_name: privateRoomSession.name, payload: msg, created_at: Date.now()
         });
@@ -7442,7 +7446,7 @@
                 const youPhoto = it.isProfile ? safeImgUrl(state.userProfile.avatarUrl) : '';
                 if (it.isProfile) {
                   return `
-                    <button type="button" data-action="nav" data-nav="${it.id}" data-dock-btn="${it.id}" data-you-src="${escapeHtml(youPhoto)}" title="${it.label}" aria-label="${it.label}" class="relative h-[56px] px-1 rounded-full overflow-hidden flex items-center justify-center ${youPhoto ? (active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]') : (active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium')}">
+                    <button type="button" data-action="nav" data-nav="${it.id}" data-dock-btn="${it.id}" data-you-src="${escapeHtml(youPhoto)}" title="${it.label}" aria-label="${it.label}" class="relative h-[56px] px-1 rounded-full overflow-hidden flex items-center justify-center ${youPhoto ? (active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]') : (active ? 'bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white font-bold shadow-[0_8px_24px_-6px_rgba(63,137,246,0.58)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium')}">
                       <span data-dock-you-inner class="w-full h-full flex items-center justify-center">
                         ${youPhoto
                           ? `<img src="${youPhoto}" alt="" onerror="this.style.display=\'none\';" class="absolute inset-0 w-full h-full object-cover rounded-full" />`
@@ -7453,7 +7457,7 @@
                   `;
                 }
                 return `
-                  <button type="button" data-action="nav" data-nav="${it.id}" data-dock-btn="${it.id}" title="${it.label}" aria-label="${it.label}" class="relative flex items-center justify-center h-[56px] px-1 rounded-full ${active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}">
+                  <button type="button" data-action="nav" data-nav="${it.id}" data-dock-btn="${it.id}" title="${it.label}" aria-label="${it.label}" class="relative flex items-center justify-center h-[56px] px-1 rounded-full ${active ? 'bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white font-bold shadow-[0_8px_24px_-6px_rgba(63,137,246,0.58)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}">
                     ${icon(it.ico, 'w-[22px] h-[22px]')}
                     <span data-dock-badge="${it.id}" class="${it.badge > 0 ? '' : 'hidden '}absolute -top-1 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full ${active ? 'bg-white text-ink dark:bg-ink dark:text-white' : 'bg-ink text-white dark:bg-white dark:text-ink'} text-[10px] font-extrabold flex items-center justify-center shadow-sm">${it.badge > 99 ? '99+' : it.badge}</span>
                   </button>
@@ -7484,7 +7488,7 @@
           const id = btn.getAttribute('data-dock-btn');
           const active = state.activeNav === id;
           if (id === 'you') {
-            const wantCls = `relative h-[56px] px-1 rounded-full overflow-hidden flex items-center justify-center ${youPhoto ? (active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]') : (active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium')}`;
+            const wantCls = `relative h-[56px] px-1 rounded-full overflow-hidden flex items-center justify-center ${youPhoto ? (active ? 'ring-2 ring-ink dark:ring-white shadow-[0_8px_22px_-8px_rgba(0,0,0,0.28)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.12)]') : (active ? 'bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white font-bold shadow-[0_8px_24px_-6px_rgba(63,137,246,0.58)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium')}`;
             if (btn.className !== wantCls) btn.className = wantCls;
             if (btn.getAttribute('data-you-src') !== (youPhoto || '')) {
               btn.setAttribute('data-you-src', youPhoto || '');
@@ -7496,7 +7500,7 @@
               }
             }
           } else {
-            const wantCls = `relative flex items-center justify-center h-[56px] px-1 rounded-full ${active ? 'bg-ink/90 text-white dark:bg-white/95 dark:text-ink font-bold shadow-[0_8px_22px_-8px_rgba(0,0,0,0.22)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}`;
+            const wantCls = `relative flex items-center justify-center h-[56px] px-1 rounded-full ${active ? 'bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white font-bold shadow-[0_8px_24px_-6px_rgba(63,137,246,0.58)]' : 'glass-pill !shadow-[0_6px_18px_-8px_rgba(0,0,0,0.09)] text-ink/75 dark:text-white/80 font-medium'}`;
             if (btn.className !== wantCls) btn.className = wantCls;
             const bEl = btn.querySelector(`[data-dock-badge="${id}"]`);
             if (bEl) {
@@ -7918,15 +7922,15 @@
         return `
           <main id="active-chat-main" class="${mobileCls} absolute inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-white dark:bg-[#0B0B0D]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
             <!-- Minimalist Clean White & Black Upper Shelf -->
-            <header id="active-chat-header" data-chat-id="${escapeHtml(chat.id)}" style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 ${isPrivateMode ? 'bg-black/90' : 'bg-white/75 dark:bg-[#09090C]/75'} backdrop-blur-2xl shadow-[0_8px_28px_-14px_rgba(9,9,12,0.14)]">
+            <header id="active-chat-header" data-chat-id="${escapeHtml(chat.id)}" style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 bg-[#09090C] text-white">
               <div class="flex items-center gap-3 min-w-0">
-                <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition ${isPrivateMode ? 'bg-white/15 text-white hover:bg-white/20 border border-white/15' : 'glass-pill text-ink dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black'}">
+                <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition bg-white/[0.12] text-white hover:bg-white/[0.22] border border-white/[0.18]">
                   ${icon('back', 'w-5 h-5')}
                 </button>
                 <button data-action="open-modal" data-modal="contactMenu" title="Contact info, search &amp; options" class="flex items-center gap-3 min-w-0 text-left rounded-full pr-2 py-0.5 hover:opacity-80 transition">
                   <span id="active-chat-avatar" data-av-url="${escapeHtml(chat.avatarUrl || '')}" class="relative inline-flex shrink-0 ${isPrivateMode ? 'profile-dotted-ring' : ''}">${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}</span>
                   <div class="min-w-0">
-                    <h2 id="active-chat-name" class="title-display text-[20px] font-bold ${isPrivateMode ? 'text-white' : 'text-ink dark:text-white'} truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
+                    <h2 id="active-chat-name" class="title-display text-[20px] font-bold text-white truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
                     ${isPrivateMode
                       ? '<p class="text-[10.5px] text-white/70 font-semibold tracking-wider uppercase leading-tight mt-0.5">Private Mode • Pull right edge to exit</p>'
                       : ''}
@@ -7934,25 +7938,25 @@
                 </button>
               </div>
               <!-- Minimalist White & Black Pill for Video & Audio Call -->
-              <div class="h-10 shrink-0 flex items-center gap-1 px-1.5 rounded-full ${isPrivateMode ? 'bg-white/15 border border-white/15' : 'glass-pill'}">
-                <button data-action="start-call" data-type="video" title="Video Call" class="w-9 h-8 rounded-full flex items-center justify-center transition ${isPrivateMode ? 'text-white hover:bg-white/15' : 'text-ink dark:text-white hover:bg-white dark:hover:bg-black'}">
+              <div class="h-10 shrink-0 flex items-center gap-1 px-1.5 rounded-full bg-white/[0.12] border border-white/[0.18]">
+                <button data-action="start-call" data-type="video" title="Video Call" class="w-9 h-8 rounded-full flex items-center justify-center transition text-white hover:bg-white/15">
                   ${icon('video', 'w-[19px] h-[19px]')}
                 </button>
-                <button data-action="start-call" data-type="voice" title="Audio Call" class="w-9 h-8 rounded-full flex items-center justify-center transition ${isPrivateMode ? 'text-white hover:bg-white/15' : 'text-ink dark:text-white hover:bg-white dark:hover:bg-black'}">
+                <button data-action="start-call" data-type="voice" title="Audio Call" class="w-9 h-8 rounded-full flex items-center justify-center transition text-white hover:bg-white/15">
                   ${icon('calls', 'w-[18px] h-[18px]')}
                 </button>
               </div>
             </header>
 
             ${ui.inChatSearchOpen ? `
-              <div data-smart-search="message-feed" class="smart-search-wrap shrink-0 px-4 sm:px-6 py-2 border-b border-zinc-100 dark:border-zinc-900 bg-surface/60 dark:bg-zinc-900/60 flex items-center gap-2">
-                <input id="inchat-search-input" type="text" value="${escapeHtml(ui.inChatSearchQuery)}" placeholder="Search in this chat..." class="flex-1 bg-white/95 dark:bg-zinc-900 border border-[#09090C]/20 dark:border-white/20 text-[13.5px] px-3.5 py-1.5 rounded-full focus:outline-none focus:border-[#09090C]/55 focus:ring-2 focus:ring-[#09090C]/10 transition" />
+              <div data-smart-search="message-feed" class="smart-search-wrap shrink-0 px-4 sm:px-6 py-2 border-b border-white/[0.08] bg-[#111116]/95 flex items-center gap-2">
+                <input id="inchat-search-input" type="text" value="${escapeHtml(ui.inChatSearchQuery)}" placeholder="Search in this chat..." class="flex-1 bg-white/[0.08] border border-white/[0.14] text-white placeholder:text-white/45 text-[13.5px] px-3.5 py-1.5 rounded-full focus:outline-none focus:border-[#3F89F6] focus:ring-2 focus:ring-[#3F89F6]/25 transition" />
                 <button data-action="toggle-chat-search" class="p-1 text-muted hover:text-ink">${icon('close', 'w-4 h-4')}</button>
               </div>
             ` : ''}
 
             <!-- Messages Feed -->
-            <div id="message-feed" data-scroll-host="message-feed" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-4 sm:px-6 pt-4 pb-28 space-y-2 ${ui.shoulderVeil ? 'shoulder-veil-on' : ''} ${isPrivateMode ? 'private-chat-box' : (state.wallpaper === 'custom' ? 'bg-cover bg-center' : 'wp-' + (state.wallpaper || 'clean'))}" ${!isPrivateMode && state.wallpaper === 'custom' && state.customWallpaperUrl ? `style="background-image:url('${safeImgUrl(state.customWallpaperUrl)}')"` : ''}>
+            <div id="message-feed" data-scroll-host="message-feed" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-4 sm:px-6 pt-4 pb-28 space-y-2 ${ui.shoulderVeil ? 'shoulder-veil-on' : ''} ${isPrivateMode ? 'private-chat-box' : (state.wallpaper === 'custom' ? 'bg-cover bg-center' : ((state.wallpaper || 'clean') === 'clean' ? 'bg-[#09090C] bg-[radial-gradient(ellipse_at_top,rgba(63,137,246,0.09),transparent_58%)] text-white' : 'wp-' + state.wallpaper))}" ${!isPrivateMode && state.wallpaper === 'custom' && state.customWallpaperUrl ? `style="background-image:url('${safeImgUrl(state.customWallpaperUrl)}')"` : ''}>
               <div class="flex justify-center pb-2.5">
                 ${isPrivateMode ? `
                   <div class="flex flex-col items-center gap-2 py-2">
@@ -7961,8 +7965,8 @@
                     <button type="button" data-action="exit-private-chat" class="mt-1 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11.5px] font-semibold text-white/90 transition">Exit Private</button>
                   </div>
                 ` : `
-${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `<button type="button" data-action="load-older-msgs" data-id="${chat.id}" class="mr-2 px-3 py-1 rounded-full bg-black/[0.06] dark:bg-white/[0.1] text-[11px] font-semibold text-ink dark:text-white hover:opacity-80 transition">${roomOlderLoading[chat.id] ? 'Loading...' : 'Load older'}</button>` : ''}
-                                    <span class="glass-pill px-3.5 py-1 rounded-full text-[11px] font-semibold text-ink/70 dark:text-white/75 tracking-tight">Today</span>
+${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `<button type="button" data-action="load-older-msgs" data-id="${chat.id}" class="mr-2 px-3 py-1 rounded-full bg-white/15 text-[11px] font-semibold text-white hover:opacity-80 transition">${roomOlderLoading[chat.id] ? 'Loading...' : 'Load older'}</button>` : ''}
+                                    <span class="px-3.5 py-1 rounded-full bg-white/12 border border-white/15 backdrop-blur-md text-[11px] font-semibold text-white/85 tracking-tight">Today</span>
                 `}
               </div>
               ${(ui.inChatSearchQuery ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase())) : activeMessages).map(m => renderBubble(chat, m)).join('')}
@@ -7973,7 +7977,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 Shoulder Veil On • Double-tap to reveal
               </button>
             ` : ''}
-            <button id="chat-scroll-jump-btn" type="button" data-action="chat-scroll-jump" data-dir="down" aria-label="Jump to bottom or top" class="opacity-0 pointer-events-none translate-y-2 absolute bottom-[92px] right-4 sm:right-6 z-30 w-10 h-10 rounded-full glass-pill text-[#09090C] dark:text-white flex items-center justify-center transition-all duration-200 active:scale-95">
+            <button id="chat-scroll-jump-btn" type="button" data-action="chat-scroll-jump" data-dir="down" aria-label="Jump to bottom or top" class="opacity-0 pointer-events-none translate-y-2 absolute bottom-[92px] right-4 sm:right-6 z-30 w-10 h-10 rounded-full bg-[#1C1C24]/90 border border-white/15 backdrop-blur-xl text-white flex items-center justify-center transition-all duration-200 active:scale-95">
               <svg class="w-[18px] h-[18px] transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
             </button>
 
@@ -8069,30 +8073,30 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                           <svg id="plus-ring-dotted" class="ring-second-layer ring-second-dotted ${(isInChatNow && isTypingNow) ? 'opacity-100' : 'opacity-0 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
                             <circle cx="32" cy="32" r="29.5" fill="none" stroke="#3F89F6" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
                           </svg>
-                          <button id="chat-plus-btn" type="button" data-action="toggle-attach" title="Tap for menu • Double-tap for timer" class="${isPrivateMode ? 'glass-dark-pill text-white' : (ui.attachMenuOpen ? 'bg-ink text-white dark:bg-white dark:text-ink' : 'soft-bw-glass text-ink dark:text-white')} ${isOnlineNow ? 'w-[38px] h-[38px]' : 'w-12 h-12'} rounded-full flex items-center justify-center select-none">
+                          <button id="chat-plus-btn" type="button" data-action="toggle-attach" title="Tap for menu • Double-tap for timer" class="${ui.attachMenuOpen ? 'bg-[#3F89F6] text-white' : 'bg-[#17171D]/95 text-white border border-white/[0.1]'} ${isOnlineNow ? 'w-[38px] h-[38px]' : 'w-12 h-12'} rounded-full flex items-center justify-center select-none">
                             ${icon(ui.attachMenuOpen ? 'close' : 'plus', 'w-[22px] h-[22px]')}
                           </button>
                         </div>
                       </div>
                     `;
                   })()}
-                  <div id="composer-pill" class="${isPrivateMode ? 'glass-dark-pill' : 'soft-bw-glass'} ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5">
-                    <input id="message-input" type="text" enterkeyhint="send" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] ${isPrivateMode ? 'text-white placeholder:text-white/50' : 'text-ink dark:text-white placeholder-muted'} focus:outline-none" />
-                    <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isPrivateMode ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-ink/70 dark:text-white/75 hover:text-ink dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'} transition">
+                  <div id="composer-pill" class="bg-[#16161E]/95 border border-white/[0.14] focus-within:border-[#3F89F6]/70 focus-within:ring-2 focus-within:ring-[#3F89F6]/20 backdrop-blur-xl ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5 shadow-[0_10px_28px_-8px_rgba(0,0,0,0.65)] transition">
+                    <input id="message-input" type="text" enterkeyhint="send" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] text-white placeholder:text-white/45 focus:outline-none" />
+                    <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white/80 hover:text-white hover:bg-white/10 transition">
                       ${icon('camera', 'w-[20px] h-[20px]')}
                     </button>
                   </div>
-                  <button id="chat-upi-btn" type="button" data-action="open-modal" data-modal="upi" title="Send or Request UPI" class="upi-merge-btn ${(document.activeElement && document.activeElement.id === 'message-input') || ((ui.draftsByChat && ui.draftsByChat[chat.id] || '').trim().length > 0) ? 'upi-merged' : ''} h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] hover:scale-105 active:scale-95">
+                  <button id="chat-upi-btn" type="button" data-action="open-modal" data-modal="upi" title="Send or Request UPI" class="upi-merge-btn ${(document.activeElement && document.activeElement.id === 'message-input') || ((ui.draftsByChat && ui.draftsByChat[chat.id] || '').trim().length > 0) ? 'upi-merged' : ''} h-12 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shrink-0 shadow-[0_6px_18px_-4px_rgba(63,137,246,0.55)] hover:scale-105 active:scale-95">
                     <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M6 4h12"/>
                       <path d="M6 9h12"/>
                       <path d="M9 4a5 5 0 0 1 0 10H6l8.5 7"/>
                     </svg>
                   </button>
-                  <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Hold &amp; swipe left for Walkie-Talkie" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shrink-0 shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] transition-transform duration-150 hover:scale-105 active:scale-95">
+                  <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Hold &amp; swipe left for Walkie-Talkie" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full bg-white text-[#09090C] flex items-center justify-center shrink-0 shadow-[0_4px_14px_-4px_rgba(255,255,255,0.25)] transition-transform duration-150 hover:scale-105 active:scale-95">
                     ${icon('mic', 'w-[20px] h-[20px]')}
                   </button>
-                  <button id="chat-send-btn" type="button" data-action="send-chat-now" title="Send" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" ontouchstart="event.preventDefault()" class="hidden w-12 h-12 rounded-full ${isPrivateMode ? 'bg-white text-[#09090C]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} flex items-center justify-center shadow-[0_4px_12px_-4px_rgba(9,9,12,0.28)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
+                  <button id="chat-send-btn" type="button" data-action="send-chat-now" title="Send" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" ontouchstart="event.preventDefault()" class="hidden w-12 h-12 rounded-full bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white border border-white/20 flex items-center justify-center shadow-[0_6px_20px_-4px_rgba(63,137,246,0.62)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
                     <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
                   </button>
                 </form>
@@ -8102,32 +8106,32 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <div style="margin-bottom:max(1rem, env(safe-area-inset-bottom));" class="mx-3 sm:mx-auto sm:max-w-lg px-4 pt-3 pb-4 rounded-[42px] ${isPrivateMode ? 'attach-liquid-glass-dark' : 'attach-liquid-glass'} attach-shelf-rise">
                   <div class="w-8 h-1 rounded-full bg-black/15 dark:bg-white/25 mx-auto mb-3"></div>
                   <div class="grid grid-cols-5 gap-1.5">
-                    <button type="button" data-action="open-modal" data-modal="poll" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
-                      <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
+                    <button type="button" data-action="open-modal" data-modal="poll" class="py-2.5 px-1.5 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
+                      <span class="w-9 h-9 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Polls</span>
                     </button>
-                    <input id="direct-gallery-input" type="file" accept="image/*,video/*" class="sr-only" /><button type="button" data-action="open-gallery-picker" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
-                      <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
+                    <input id="direct-gallery-input" type="file" accept="image/*,video/*" class="sr-only" /><button type="button" data-action="open-gallery-picker" class="py-2.5 px-1.5 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
+                      <span class="w-9 h-9 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Gallery</span>
                     </button>
-                    <button type="button" data-action="open-modal" data-modal="shareContact" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
-                      <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
+                    <button type="button" data-action="open-modal" data-modal="shareContact" class="py-2.5 px-1.5 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
+                      <span class="w-9 h-9 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Contacts</span>
                     </button>
-                    <button type="button" data-action="open-doc-picker" class="py-2.5 px-1.5 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
-                      <span class="w-9 h-9 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] flex items-center justify-center shadow-sm">
+                    <button type="button" data-action="open-doc-picker" class="py-2.5 px-1.5 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
+                      <span class="w-9 h-9 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Documents</span>
                     </button>
                     <input id="chat-doc-input" type="file" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.zip,application/pdf,text/plain" class="sr-only" />
-                    <button type="button" data-action="open-modal" data-modal="gamesHub" class="py-2.5 px-1 rounded-[24px] attach-glass-tile hover:bg-white/75 dark:hover:bg-white/15 flex flex-col items-center justify-center gap-1.5 text-ink dark:text-white active:scale-95 transition">
+                    <button type="button" data-action="open-modal" data-modal="gamesHub" class="py-2.5 px-1 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
                       <span class="w-9 h-9 rounded-full bg-[#C6A76D] text-white flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="4"/></svg>
                       </span>
@@ -8174,11 +8178,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         const isMe = msg.sender === 'me';
         const hasReply = Boolean(msg.replyTo);
         const cls = isMe
-          ? `bubble-shadow bg-gradient-to-br from-[#1B1B20] to-[#09090C] text-white dark:from-[#FAFAFC] dark:to-[#E4E4E8] dark:text-zinc-950 ${hasReply ? 'rounded-[18px] rounded-br-[8px]' : 'rounded-[22px] rounded-br-[10px]'}`
-          : `bubble-shadow bg-white/95 dark:bg-zinc-900/95 text-ink dark:text-zinc-100 border border-black/[0.06] dark:border-white/[0.09] ${hasReply ? 'rounded-[18px] rounded-bl-[8px]' : 'rounded-[22px] rounded-bl-[10px]'}`;
+          ? `bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white border border-white/[0.16] shadow-[0_6px_20px_-4px_rgba(63,137,246,0.48)] rounded-[16px] rounded-br-[5px]`
+          : `bg-[#1A1A23] text-white border border-white/[0.1] shadow-[0_4px_16px_-4px_rgba(0,0,0,0.5)] rounded-[16px] rounded-bl-[5px]`;
 
         const metaHtml = `
-          <span class="inline-flex items-center gap-1 text-[10px] font-medium tabular-nums tracking-[-0.01em] leading-none select-none ${isMe ? 'text-white/75 dark:text-zinc-950/70' : 'text-muted'}">
+          <span class="inline-flex items-center gap-1 text-[10px] font-medium tabular-nums tracking-[-0.01em] leading-none select-none ${isMe ? 'text-white/80' : 'text-white/55'}">
             ${msg.edited ? '<span class="italic">edited</span>' : ''}
             <span>${escapeHtml(msg.time)}</span>
             ${isMe ? renderTicks(msg.status, true) : ''}
@@ -8196,7 +8200,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           } else if (msg.mistDissolve && msg.mistState === 'sealed') {
             body = `<button type="button" data-action="open-mist" data-id="${msg.id}" class="text-left py-1 flex items-center gap-2 text-[13.5px] font-semibold"><span class="w-2 h-2 rounded-full bg-current opacity-70 animate-pulse"></span><span>Mist Note • Tap to read</span></button>`;
           } else {
-            body = `<div class="relative overflow-hidden rounded-2xl">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
+            body = `<div class="relative ${(msg.mistDissolve && msg.mistState === 'dissolving') ? 'overflow-hidden rounded-lg' : ''}">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
           }
         } else if (msg.type === 'tug') {
           const p = Math.max(0, Math.min(100, Number(msg.pos ?? 50)));
@@ -8280,11 +8284,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <div class="text-[11px] tabular-nums opacity-75 truncate">${escapeHtml(msg.upiId || '')}</div>
               </div>
               <div class="grid grid-cols-2 gap-1.5 pt-0.5">
-                <button type="button" data-action="copy-raw" data-text="${escapeHtml(msg.upiId || '')}" class="py-2 rounded-full ${isMe ? 'bg-white/15 text-white' : 'bg-black/[0.06] dark:bg-white/10 text-ink dark:text-white'} text-[11.5px] font-semibold">Copy ID</button>
+                <button type="button" data-action="copy-raw" data-text="${escapeHtml(msg.upiId || '')}" class="py-2 rounded-full bg-white/15 text-white text-[11.5px] font-semibold">Copy ID</button>
                 ${msg.paid ? `
                   <span class="py-2 rounded-full bg-[#C6A76D] text-white text-[11.5px] font-bold flex items-center justify-center">Paid</span>
                 ` : `
-                  <button type="button" data-action="fulfill-request" data-msgid="${msg.id}" data-amt="${amtVal > 0 ? amtVal : ''}" data-note="${amtVal > 0 ? `QR Pay ₹${amtVal}` : 'QR Scan Pay'}" class="py-2 rounded-full ${isMe ? 'bg-white text-[#09090C]' : 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C]'} text-[11.5px] font-bold">${amtVal > 0 ? `Pay ${formatRupees(amtVal)}` : 'Pay Now'}</button>
+                  <button type="button" data-action="fulfill-request" data-msgid="${msg.id}" data-amt="${amtVal > 0 ? amtVal : ''}" data-note="${amtVal > 0 ? `QR Pay ₹${amtVal}` : 'QR Scan Pay'}" class="py-2 rounded-full ${isMe ? 'bg-white text-[#09090C]' : 'bg-[#3F89F6] text-white'} text-[11.5px] font-bold">${amtVal > 0 ? `Pay ${formatRupees(amtVal)}` : 'Pay Now'}</button>
                 `}
               </div>
             </div>
@@ -8300,11 +8304,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <div class="text-[13px] opacity-90">${escapeHtml(msg.note)}</div>
               <div class="text-[10.5px] font-sans tabular-nums opacity-75 mt-1.5 truncate">${escapeHtml(msg.upiId)} ${msg.receiptSig ? '• ' + escapeHtml(msg.receiptSig) : ''}</div>
               <div class="mt-2 flex flex-wrap items-center gap-1.5">
-                <button type="button" data-action="open-upi-receipt" data-txnid="${escapeHtml(msg.txnId || msg.id)}" data-name="${escapeHtml(isMe ? (chat ? chat.name : 'Contact') : (msg.senderName || 'Contact'))}" data-upi="${escapeHtml(msg.upiId || '')}" data-amt="${Number(msg.amount || 0)}" data-note="${escapeHtml(msg.note || 'UPI Payment')}" data-sig="${escapeHtml(msg.receiptSig || '')}" data-date="${escapeHtml(msg.time || '')}" class="px-3 py-1 rounded-full ${isMe ? 'bg-white/20 text-white' : 'bg-black/[0.06] dark:bg-white/15 text-ink dark:text-white'} text-[11px] font-semibold">
+                <button type="button" data-action="open-upi-receipt" data-txnid="${escapeHtml(msg.txnId || msg.id)}" data-name="${escapeHtml(isMe ? (chat ? chat.name : 'Contact') : (msg.senderName || 'Contact'))}" data-upi="${escapeHtml(msg.upiId || '')}" data-amt="${Number(msg.amount || 0)}" data-note="${escapeHtml(msg.note || 'UPI Payment')}" data-sig="${escapeHtml(msg.receiptSig || '')}" data-date="${escapeHtml(msg.time || '')}" class="px-3 py-1 rounded-full bg-white/18 text-white text-[11px] font-semibold">
                   View Receipt
                 </button>
                 ${(!isMe && !msg.escrow && !msg.receiverConfirmed) ? `
-                  <button type="button" data-action="confirm-upi-received" data-msgid="${msg.id}" data-txnid="${escapeHtml(msg.txnId || '')}" data-amt="${Number(msg.amount || 0)}" class="px-3 py-1 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[11px] font-bold">
+                  <button type="button" data-action="confirm-upi-received" data-msgid="${msg.id}" data-txnid="${escapeHtml(msg.txnId || '')}" data-amt="${Number(msg.amount || 0)}" class="px-3 py-1 rounded-full bg-[#3F89F6] text-white text-[11px] font-bold">
                     Confirm Received
                   </button>
                 ` : ''}
@@ -8329,7 +8333,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </button>
               ` : `
                 <div class="mt-2.5 flex items-center gap-1.5">
-                  <button type="button" data-action="fulfill-request" data-msgid="${msg.id}" data-amt="${msg.amount}" data-note="${escapeHtml(msg.note)}" class="flex-1 py-1.5 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12px] font-bold">
+                  <button type="button" data-action="fulfill-request" data-msgid="${msg.id}" data-amt="${msg.amount}" data-note="${escapeHtml(msg.note)}" class="flex-1 py-1.5 rounded-full bg-[#3F89F6] text-white text-[12px] font-bold">
                     Pay ${formatRupees(msg.amount)}
                   </button>
                   <button type="button" data-action="decline-upi-request" data-msgid="${msg.id}" class="px-3 py-1.5 rounded-full bg-black/10 dark:bg-white/15 text-[12px] font-semibold">
@@ -8406,7 +8410,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (msg.type === 'contact') {
           body = `
             ${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener noreferrer" class="w-56 p-0.5 flex items-center gap-3 hover:opacity-80 transition">` : '<div class="w-56 p-0.5 flex items-center gap-3">'}
-              <div class="w-10 h-10 rounded-full ${isMe ? 'bg-white text-[#09090C]' : 'bg-[#09090C] text-white dark:bg-white dark:text-[#09090C]'} font-bold text-[14px] flex items-center justify-center shrink-0">${escapeHtml(getInitial(msg.contactName || 'C'))}</div>
+              <div class="w-10 h-10 rounded-full ${isMe ? 'bg-white text-[#09090C]' : 'bg-[#3F89F6] text-white'} font-bold text-[14px] flex items-center justify-center shrink-0">${escapeHtml(getInitial(msg.contactName || 'C'))}</div>
               <div class="min-w-0 flex-1">
                 <div class="text-[10px] font-bold uppercase tracking-wider opacity-65">Contact</div>
                 <div class="title-display font-bold text-[14px] truncate">${escapeHtml(msg.contactName || 'Contact')}</div>
@@ -8417,7 +8421,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (msg.type === 'document') {
           body = `
             <div class="w-56 p-0.5 flex items-center gap-3">
-              <div class="w-10 h-10 rounded-2xl ${isMe ? 'bg-white/15 text-white' : 'bg-black/[0.06] dark:bg-white/10 text-ink dark:text-white'} flex items-center justify-center shrink-0">
+              <div class="w-10 h-10 rounded-2xl bg-white/15 text-white flex items-center justify-center shrink-0">
                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
               </div>
               <div class="min-w-0 flex-1">
@@ -8455,14 +8459,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             <span data-swipe-reply-icon class="pointer-events-none absolute ${isMe ? 'right-0 translate-x-10' : 'left-0 -translate-x-10'} top-1/2 -translate-y-1/2 w-8 h-8 rounded-full glass-pill text-ink dark:text-white flex items-center justify-center opacity-0 scale-75 transition-opacity">
               ${icon('reply', 'w-4 h-4')}
             </span>
-            <div data-bubble-inner class="max-w-[82%] sm:max-w-[60%] ${hasReply ? 'px-4 py-2' : 'px-3.5 py-1.5'} ${cls}">
+            <div data-bubble-inner class="max-w-[82%] sm:max-w-[60%] px-4 py-2.5 ${cls}">
               ${!isMe && chat.isGroup ? `<div class="text-[11px] font-semibold text-brand-500 mb-0.5">${escapeHtml(msg.senderName)}</div>` : ''}
               ${msg.replyTo ? `<div class="mb-1.5 px-2.5 py-1.5 rounded-[12px] border-l-[3px] border-[#C6A76D] ${isMe ? 'bg-white/[0.11] dark:bg-black/[0.06]' : 'bg-black/[0.045] dark:bg-white/[0.07]'} flex flex-col gap-0.5 min-w-0"><span class="text-[11px] font-bold tracking-tight text-[#C6A76D] truncate">${escapeHtml(msg.replyTo.sender || 'Message')}</span><span class="text-[12px] leading-snug opacity-85 line-clamp-2 break-words">${escapeHtml(msg.replyTo.text || '')}</span></div>` : ''}
               ${body}
               ${msg.type !== 'text' ? `<div class="flex items-center justify-end gap-1 mt-1">${metaHtml}</div>` : ''}
             </div>
             ${msg.reactions && msg.reactions.length > 0 ? `
-              <div class="relative z-10 -mt-2.5 mb-1 ${isMe ? 'mr-2' : 'ml-2'} inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white dark:bg-zinc-900 border border-black/[0.06] dark:border-white/[0.12] text-[15.5px] leading-tight shadow-sm">
+              <div class="relative z-10 -mt-2.5 mb-1 ${isMe ? 'mr-2' : 'ml-2'} inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#1E1E28]/95 border border-white/[0.15] text-[15.5px] leading-tight shadow-md backdrop-blur-md">
                 ${msg.reactions.map(r => `<span>${r}</span>`).join('')}
               </div>
             ` : ''}
@@ -8680,7 +8684,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (supaRealtimeChan) {
           try { supaRealtimeChan.send({ type: 'broadcast', event: 'world_msg_fast', payload: msg }); } catch (_) {}
         }
-        supaWriteReliable('shavlo_messages', 'POST', '', {
+        supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
           id: msg.id, room_id: 'world_global_chat', author_id: activeVaultId,
           author_name: msg.authorName, payload: msg, created_at: now
         });
@@ -9088,7 +9092,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   </div>
                 ` : `
                   <!-- Read Receipts Card -->
-                  <div class="p-5 ios-card rounded-3xl bg-white border border-zinc-200/60 space-y-3">
+                  <div class="p-5 ios-card rounded-3xl bg-[#14141C] border border-white/[0.08] space-y-3">
                     <div class="flex items-center justify-between">
                       <div>
                         <div class="title-display text-[15px] font-bold tracking-[-0.02em]">Blue tick read receipts</div>
@@ -9900,6 +9904,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <span class="flex items-center gap-2.5">${icon('shield', 'w-4 h-4')}<span>${isChatBlocked(chat.id) ? 'Unblock ' + escapeHtml(chat.name) : 'Block ' + escapeHtml(chat.name)}</span></span>
                   <span class="text-[12px]">${isChatBlocked(chat.id) ? 'Blocked' : ''}</span>
                 </button>
+                ${chat.isPeer && chat.peerVaultId ? `
+                  <button type="button" data-action="remove-friend" data-id="${chat.id}" data-peer="${escapeHtml(chat.peerVaultId)}" data-name="${escapeHtml(chat.name)}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold text-rose-600 dark:text-rose-400 transition">
+                    <span class="flex items-center gap-2.5">${icon('userAdd', 'w-4 h-4')}<span>Remove friend</span></span>
+                  </button>
+                ` : ''}
               `}
               <button type="button" data-action="ctx-delete-chat" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold text-rose-600 dark:text-rose-400 transition">
                 <span class="flex items-center gap-2.5">${icon('trash', 'w-4 h-4')}<span>Delete chat</span></span>
@@ -13423,6 +13432,25 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             showToast(`Pinged ${target.name}! 👋`);
           }
           ui.modal = null; ui.contextMenuChatId = null; render();
+        } else if (action === 'remove-friend') {
+          const cid = btn.dataset.id || '';
+          const peerId = btn.dataset.peer || '';
+          const uname = btn.dataset.name || 'Friend';
+          const net = getNetwork();
+          const matched = (net.friendships || []).filter(f => f.users && f.users.includes(activeVaultId) && f.users.includes(peerId));
+          net.friendships = (net.friendships || []).filter(f => !(f.users && f.users.includes(activeVaultId) && f.users.includes(peerId)));
+          saveNetwork(net, 'remove_friend');
+          matched.forEach(f => {
+            if (f && f.id) supaWriteReliable('shavlo_friendships', 'DELETE', `?id=eq.${encodeURIComponent(f.id)}`, null);
+          });
+          if (peerId && activeVaultId) {
+            supaWriteReliable('shavlo_friendships', 'DELETE', `?or=(and(user_a.eq.${encodeURIComponent(activeVaultId)},user_b.eq.${encodeURIComponent(peerId)}),and(user_a.eq.${encodeURIComponent(peerId)},user_b.eq.${encodeURIComponent(activeVaultId)}))`, null);
+          }
+          if (state.selectedChatId === cid) { state.selectedChatId = null; state.mobileView = 'list'; }
+          ui.modal = null; ui.contextMenuChatId = null;
+          persistCurrentVault();
+          render();
+          showToast(`Removed ${uname} from friends`);
         } else if (action === 'toggle-block') {
           toggleBlockChat(btn.dataset.id, btn.dataset.name);
           if (ui.modal === 'chatContext' || ui.modal === 'contactMenu') { ui.modal = null; ui.contextMenuChatId = null; }
@@ -14155,7 +14183,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   vItem.url = cdnUrl;
                   persistCurrentVault();
                 }
-                supaWriteReliable('shavlo_vault_items', 'POST', '', {
+                supaWriteReliable('shavlo_vault_items', 'POST', '?on_conflict=id', {
                   id: vId, vault_id: activeVaultId, payload: vItem, created_at: Date.now()
                 });
               });
@@ -14622,20 +14650,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             if (ui.walkieActive) stopWalkieTalkie();
             ui.mistPickerOpen = false; ui.mistNext = false; ui.mist24h = false;
             triggerHaptic(10);
-            const finishExit = () => {
-              state.mobileView = 'list';
-              ui._navTransition = 'right';
-              syncOwnPresence();
-              render();
-            };
-            if (mainChat) {
-              mainChat.style.transition = 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease';
-              mainChat.style.transform = 'translate3d(100%, 0, 0)';
-              mainChat.style.opacity = '0.92';
-              setTimeout(finishExit, 190);
-            } else {
-              finishExit();
-            }
+            state.mobileView = 'list';
+            ui._navTransition = '';
+            syncOwnPresence();
+            render();
+            if (typeof syncWithSupabase === 'function') syncWithSupabase();
             return;
           } else if (mainChat) {
             mainChat.style.transition = 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)';
