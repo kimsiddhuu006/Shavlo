@@ -513,22 +513,23 @@
         0 12px 30px -6px rgba(0, 0, 0, 0.55);
     }
     .smart-search-wrap {
-      display: grid;
-      grid-template-rows: 1fr;
+      max-height: 72px;
+      margin-bottom: 0px;
       opacity: 1;
-      transform: translate3d(0, 0, 0);
-      transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-      will-change: grid-template-rows, opacity, transform;
-      contain: layout style;
+      overflow: hidden;
+      transform-origin: top center;
+      transform: translate3d(0, 0, 0) scaleY(1);
+      transition: max-height 340ms cubic-bezier(0.22, 1, 0.36, 1), margin-bottom 340ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: max-height, opacity, transform;
     }
     .smart-search-wrap > * {
       min-height: 0;
-      overflow: hidden;
     }
     .smart-search-wrap.search-hidden {
-      grid-template-rows: 0fr;
+      max-height: 0px;
+      margin-bottom: -10px;
       opacity: 0;
-      transform: translate3d(0, -8px, 0);
+      transform: translate3d(0, -10px, 0) scaleY(0.92);
       pointer-events: none;
     }
     .status-cube-scene {
@@ -604,6 +605,7 @@
   <div id="lock-root"></div>
   <div id="status-root"></div>
   <div id="game-root"></div>
+  <div id="open-room-root"></div>
   <div id="toast-root" class="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[90] pointer-events-none flex flex-col gap-2 items-center"></div>
 
   <script>
@@ -1228,12 +1230,13 @@
               peerChats: p.peerChats || {},
               activeCalls: p.activeCalls || {},
               statuses: Array.isArray(p.statuses) ? p.statuses : [],
-              groups: Array.isArray(p.groups) ? p.groups : []
+              groups: Array.isArray(p.groups) ? p.groups : [],
+              openRooms: Array.isArray(p.openRooms) ? p.openRooms : []
             };
             return networkCache;
           }
         } catch (e) { /* ignore */ }
-        networkCache = { directory: {}, requests: [], friendships: [], peerChats: {}, activeCalls: {}, statuses: [], groups: [] };
+        networkCache = { directory: {}, requests: [], friendships: [], peerChats: {}, activeCalls: {}, statuses: [], groups: [], openRooms: [] };
         return networkCache;
       }
       let netSaveTimer = null;
@@ -1895,6 +1898,7 @@
           updates: ['updates-scroll', renderUpdatesTab],
           calls: ['calls-scroll', renderCallsTab],
           groups: ['groups-scroll', renderGroupsTab],
+          rooms: ['rooms-scroll', renderRoomsTab],
           you: ['you-scroll', renderYouTab]
         };
         if (scrollMap[nav]) {
@@ -2337,12 +2341,15 @@
         _rtcPeerPromise = (async () => {
           const pc = new RTCPeerConnection({ iceServers: getIceServers(), iceCandidatePoolSize: 6, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
           rtcPc = pc;
-          remoteMediaStream = new MediaStream();
+          if (!remoteMediaStream) remoteMediaStream = new MediaStream();
           pc.ontrack = (ev) => {
-            if (ev.streams && ev.streams[0]) {
-              remoteMediaStream = ev.streams[0];
-            } else if (ev.track) {
+            if (ev.track && !remoteMediaStream.getTracks().some(t => t.id === ev.track.id)) {
               remoteMediaStream.addTrack(ev.track);
+            }
+            if (ev.streams && ev.streams[0]) {
+              ev.streams[0].getTracks().forEach(t => {
+                if (!remoteMediaStream.getTracks().some(x => x.id === t.id)) remoteMediaStream.addTrack(t);
+              });
             }
             if (ev.track) {
               ev.track.onunmute = () => { if (typeof attachCallStreams === 'function') attachCallStreams(); };
@@ -2459,6 +2466,7 @@
       }
 
       let _preCreatedOffer = null;
+      let _prewarmPromise = null;
       let _offerSentRoom = '';
       let _queuedIceToSend = [];
       function enableOpusDtx(sdpObj) {
@@ -2494,14 +2502,17 @@
         }
       }
 
-      async function prewarmCallOffer(roomId, peerId, callType) {
-        try {
-          const pc = await ensureWebRtcPeer(roomId, peerId, callType);
-          if (!pc || pc.signalingState !== 'stable') return;
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          _preCreatedOffer = { roomId, sdp: offer };
-        } catch (_) {}
+      function prewarmCallOffer(roomId, peerId, callType) {
+        _prewarmPromise = (async () => {
+          try {
+            const pc = await ensureWebRtcPeer(roomId, peerId, callType);
+            if (!pc || pc.signalingState !== 'stable') return;
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            _preCreatedOffer = { roomId, sdp: offer };
+          } catch (_) {}
+        })();
+        return _prewarmPromise;
       }
 
       function flushQueuedIceToSend(roomId) {
@@ -2519,24 +2530,28 @@
         if (!roomId || _offerSentRoom === roomId) return;
         _offerSentRoom = roomId;
         try {
+          if (_prewarmPromise) { try { await _prewarmPromise; } catch (_) {} }
           const pc = await ensureWebRtcPeer(roomId, peerId, callType);
           if (!pc) { _offerSentRoom = ''; return; }
+          let offerSdp = null;
           if (_preCreatedOffer && _preCreatedOffer.roomId === roomId && _preCreatedOffer.sdp) {
-            const sdp = _preCreatedOffer.sdp;
+            offerSdp = _preCreatedOffer.sdp;
             _preCreatedOffer = null;
-            sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp });
-            flushQueuedIceToSend(roomId);
-            return;
+          } else if (pc.localDescription && pc.localDescription.type === 'offer') {
+            offerSdp = pc.localDescription;
+          } else {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            offerSdp = offer;
           }
-          if (pc.localDescription && pc.localDescription.type === 'offer') {
-            sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: pc.localDescription });
-            flushQueuedIceToSend(roomId);
-            return;
-          }
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: offer });
+          sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: offerSdp });
           flushQueuedIceToSend(roomId);
+          setTimeout(() => {
+            if (ui.activeCall && ui.activeCall.roomId === roomId && rtcPc && rtcPc.signalingState === 'have-local-offer' && rtcPc.localDescription) {
+              sendWebRtcSignal(roomId, peerId, { kind: 'offer', sdp: rtcPc.localDescription });
+              flushQueuedIceToSend(roomId);
+            }
+          }, 700);
         } catch (e) { _offerSentRoom = ''; }
       }
 
@@ -2961,7 +2976,7 @@
             : '?select=id,room_id,author_id,author_name,payload,created_at,expires_at&order=created_at.desc&limit=150';
 
           const vidEnc = encodeURIComponent(activeVaultId);
-          const [users, reqs, friends, groups, msgsRaw, statuses, statusViewsRows, calls, readReceipts, upiTxns, upiContactsRows, blocksRows, sessRows, vaultRows, prefsRows] = await Promise.all([
+          const [users, reqs, friends, groups, msgsRaw, statuses, statusViewsRows, calls, readReceipts, upiTxns, upiContactsRows, blocksRows, sessRows, vaultRows, prefsRows, openRoomsRows] = await Promise.all([
             fetchUsers ? supaFetch('rpc/shavlo_get_contacts_profiles', 'POST', '', { p_vault_id: activeVaultId }).catch(() => supaFetch('shavlo_users', 'GET', '?select=vault_id,friend_code,name,upi_id,avatar_text,avatar_url,pub_key,updated_at,last_seen_at')) : Promise.resolve(null),
             supaFetch('shavlo_requests', 'GET', `?select=id,from_id,from_name,from_code,to_id,to_name,to_code,created_time&or=(from_id.eq.${vidEnc},to_id.eq.${vidEnc})`),
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
@@ -2976,7 +2991,8 @@
             supaFetch('shavlo_blocks', 'GET', `?select=id,blocker_id,blocked_id,created_at&or=(blocker_id.eq.${vidEnc},blocked_id.eq.${vidEnc})`).catch(() => []),
             fetchUsers ? supaFetch('shavlo_sessions', 'GET', `?select=id,vault_id,device_name,last_active&vault_id=eq.${vidEnc}&order=last_active.desc&limit=10`).catch(() => null) : Promise.resolve(null),
             (forceFull || supaSyncTickCount === 1) ? supaFetch('shavlo_vault_items', 'GET', `?select=id,vault_id,payload,created_at&vault_id=eq.${vidEnc}&order=created_at.desc&limit=50`).catch(() => null) : Promise.resolve(null),
-            (forceFull || supaSyncTickCount === 1) ? supaFetch('shavlo_user_prefs', 'GET', `?select=vault_id,prefs,updated_at&vault_id=eq.${vidEnc}`).catch(() => null) : Promise.resolve(null)
+            (forceFull || supaSyncTickCount === 1) ? supaFetch('shavlo_user_prefs', 'GET', `?select=vault_id,prefs,updated_at&vault_id=eq.${vidEnc}`).catch(() => null) : Promise.resolve(null),
+            supaFetch('shavlo_open_rooms', 'GET', '?is_live=eq.true&order=created_at.desc&limit=30').catch(() => null)
           ]);
           const msgs = (!forceFull && lastSupaMsgCreatedAt > 0) ? (msgsRaw || []) : (msgsRaw || []).slice().reverse();
           if (msgs.length > 0) {
@@ -3184,6 +3200,19 @@
                 state.security.shavloVaultItems.push(Object.assign({}, vr.payload, { id: vr.id }));
               }
             });
+          }
+          if (Array.isArray(openRoomsRows)) {
+            net.openRooms = openRoomsRows;
+            if (ui.activeOpenRoomId) {
+              const curR = openRoomsRows.find(r => r.id === ui.activeOpenRoomId);
+              if (!curR) {
+                ui.activeOpenRoomId = null;
+                if (typeof stopOpenRoomMic === 'function') stopOpenRoomMic();
+                if (typeof renderOpenRoomStage === 'function') renderOpenRoomStage();
+              } else if (typeof renderOpenRoomStage === 'function') {
+                renderOpenRoomStage();
+              }
+            }
           }
           if (Array.isArray(prefsRows) && prefsRows[0] && prefsRows[0].prefs && state) {
             const pr = prefsRows[0].prefs;
@@ -3435,6 +3464,50 @@
               })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_txns' }, () => scheduleSupaSync(300))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_contacts' }, () => scheduleSupaSync(300))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_open_rooms' }, (change) => {
+                try {
+                  const net = getNetwork();
+                  net.openRooms = Array.isArray(net.openRooms) ? net.openRooms : [];
+                  if (change && change.eventType === 'DELETE' && change.old && change.old.id) {
+                    net.openRooms = net.openRooms.filter(r => r.id !== change.old.id);
+                    if (ui.activeOpenRoomId === change.old.id) { ui.activeOpenRoomId = null; stopOpenRoomMic(); }
+                  } else if (change && change.new && change.new.id) {
+                    const row = change.new;
+                    if (row.is_live === false) {
+                      net.openRooms = net.openRooms.filter(r => r.id !== row.id);
+                      if (ui.activeOpenRoomId === row.id) { ui.activeOpenRoomId = null; stopOpenRoomMic(); showToast('Room ended'); }
+                    } else {
+                      const idx = net.openRooms.findIndex(r => r.id === row.id);
+                      if (idx >= 0) net.openRooms[idx] = row;
+                      else net.openRooms.unshift(row);
+                    }
+                  }
+                  saveNetwork(net, 'open_room_pg');
+                  renderOpenRoomStage();
+                  if (state && state.activeNav === 'rooms') safeBackgroundRender();
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'open_room_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.id) return;
+                  const net = getNetwork();
+                  net.openRooms = Array.isArray(net.openRooms) ? net.openRooms : [];
+                  if (payload.is_live === false) {
+                    net.openRooms = net.openRooms.filter(r => r.id !== payload.id);
+                    if (ui.activeOpenRoomId === payload.id) { ui.activeOpenRoomId = null; stopOpenRoomMic(); showToast('Room ended'); }
+                  } else {
+                    const idx = net.openRooms.findIndex(r => r.id === payload.id);
+                    if (idx >= 0) net.openRooms[idx] = payload;
+                    else net.openRooms.unshift(payload);
+                  }
+                  saveNetwork(net, 'open_room_fast');
+                  renderOpenRoomStage();
+                  if (state && state.activeNav === 'rooms') safeBackgroundRender();
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'open_room_rtc' }, ({ payload }) => {
+                if (typeof handleOpenRoomRtc === 'function') handleOpenRoomRtc(payload);
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_game_scores' }, (change) => {
                 if (change && change.new && change.new.game) {
                   ui.topGameScores = ui.topGameScores || [];
@@ -4148,6 +4221,10 @@
               notifyIncomingCall(ui.activeCall);
             } else {
               stopIncomingRingtone();
+              if (status === 'connected' && isCaller && prevStatus === 'ringing') {
+                startCallTimer();
+                startWebRtcOffer(liveCall.roomId, otherId, liveCall.type);
+              }
         try {
           if (navigator.serviceWorker && navigator.serviceWorker.ready) {
             navigator.serviceWorker.ready.then(reg => reg.getNotifications().then(ns => ns.forEach(n => { if (n.tag && n.tag.startsWith('shavlo-call-')) n.close(); }))).catch(() => {});
@@ -5397,7 +5474,14 @@
         ui.activeCall.status = 'connected';
         ui.activeCall.seconds = 0;
         if (ui.activeCall.isPeer) {
-          sendRoomBroadcast(ui.activeCall.roomId, 'call_accepted', { roomId: ui.activeCall.roomId, fromId: activeVaultId, toId: call ? call.callerId : '', type: ui.activeCall.type });
+          const accPayload = { roomId: ui.activeCall.roomId, fromId: activeVaultId, toId: call ? call.callerId : '', type: ui.activeCall.type };
+          subscribeRoomChannel(ui.activeCall.roomId);
+          sendRoomBroadcast(ui.activeCall.roomId, 'call_accepted', accPayload);
+          setTimeout(() => {
+            if (ui.activeCall && ui.activeCall.roomId === accPayload.roomId && (!rtcPc || rtcPc.signalingState === 'stable')) {
+              sendRoomBroadcast(accPayload.roomId, 'call_accepted', accPayload);
+            }
+          }, 350);
         }
         renderCallOverlay();
         acquireCallWakeLock();
@@ -6713,7 +6797,7 @@
         const msgs = room.messages || [];
         return `
           <div class="fixed inset-0 md:static w-full h-full min-h-0 flex flex-col bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <header class="shrink-0 px-4 sm:px-6 py-3.5 border-b border-black/[0.06] dark:border-white/[0.08] bg-white/75 dark:bg-[#0B0B0D]/75 backdrop-blur-md flex items-center justify-between gap-3">
+            <header class="shrink-0 px-4 sm:px-6 py-3.5 bg-white/75 dark:bg-[#0B0B0D]/75 backdrop-blur-md flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <span class="title-display font-extrabold text-[18px] tracking-tight text-ink dark:text-white">Room</span>
@@ -6928,7 +7012,7 @@
           { id: 'calls', label: 'Calls', ico: 'calls', badge: 0 },
           { id: 'groups', label: 'Groups', ico: 'groups', badge: 0 },
           { id: 'messages', label: 'Chats', ico: 'messages', badge: unreadTotal },
-          { id: 'you', label: 'You', ico: 'you', badge: 0 }
+          { id: 'rooms', label: 'Rooms', ico: 'lock', badge: 0 }
         ];
         return `
           <aside class="hidden md:flex flex-col justify-between w-[220px] shrink-0 bg-white/55 dark:bg-[#0B0B0D]/60 backdrop-blur-2xl border-r border-white/60 dark:border-white/[0.07] px-3.5 py-5">
@@ -6978,7 +7062,7 @@
           { id: 'calls', label: 'Calls', ico: 'calls', badge: 0 },
           { id: 'groups', label: 'Groups', ico: 'groups', badge: 0 },
           { id: 'messages', label: 'Chats', ico: 'messages', badge: unreadTotal },
-          { id: 'you', label: 'You', ico: 'you', badge: 0, isProfile: true }
+          { id: 'rooms', label: 'Rooms', ico: 'lock', badge: 0 }
         ];
         return `
           <div id="mobile-dock-wrap" style="bottom:max(1.35rem, env(safe-area-inset-bottom)); transform:translateZ(0); will-change:transform;" class="md:hidden fixed inset-x-3 z-30 pointer-events-none flex justify-center">
@@ -7024,7 +7108,7 @@
         }
         const unreadTotal = getMergedChats().reduce((s, c) => s + (c.unread || 0), 0);
         const unseenUpdates = getActiveStatuses().filter(st => !(st.seen || (Array.isArray(st.seenBy) && st.seenBy.includes(activeVaultId)))).length;
-        const badges = { updates: unseenUpdates, messages: unreadTotal, calls: 0, groups: 0, you: 0 };
+        const badges = { updates: unseenUpdates, messages: unreadTotal, calls: 0, groups: 0, rooms: 0 };
         const youPhoto = safeImgUrl(state.userProfile.avatarUrl);
         existingNav.querySelectorAll('button[data-dock-btn]').forEach(btn => {
           const id = btn.getAttribute('data-dock-btn');
@@ -7088,7 +7172,7 @@
 
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl z-20">
               <div class="md:hidden">${renderTopBrandHeader()}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-5">
                 <div class="flex items-center justify-between mb-3.5">
@@ -7208,14 +7292,12 @@
 
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl z-20">
               <div class="md:hidden">${renderTopBrandHeader()}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-5">
                 <div class="flex items-center justify-between mb-3.5">
                   <h1 data-action="scroll-top" data-target="groups-scroll" title="Tap to scroll to top" class="title-display text-[34px] sm:text-[38px] font-extrabold tracking-[-0.035em] leading-[1.08] text-ink dark:text-white cursor-pointer select-none">Groups</h1>
-                  <button data-action="open-modal" data-modal="privateRoomModal" title="Create or join a private room" class="h-10 px-4 rounded-full bg-[#C6A76D] hover:opacity-90 text-white text-[13.5px] font-bold shadow-sm inline-flex items-center gap-1.5 transition">
-                    <span>Room</span>
-                  </button>
+
                 </div>
                 <div data-smart-search="groups-scroll" class="smart-search-wrap">
                   <div class="relative">
@@ -7313,7 +7395,7 @@
         const history = (state.callHistory || []).filter(h => !cq || h.name.toLowerCase().includes(cq));
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl z-20">
               <div class="md:hidden">${renderTopBrandHeader()}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-5">
                 <div class="flex items-center justify-between mb-3.5">
@@ -7380,7 +7462,7 @@
           <div class="flex-1 flex h-full min-h-0 overflow-hidden bg-[#FAFAFC] dark:bg-[#0B0B0D]">
             <!-- Chat List Column -->
             <section class="${listMobileCls} flex-col w-full md:w-[340px] lg:w-[360px] shrink-0 border-r border-zinc-100 dark:border-zinc-900 h-full min-h-0 overflow-hidden">
-              <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
+              <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl z-20">
                 <div class="md:hidden">${renderTopBrandHeader()}</div>
                 <div class="px-5 pt-2 md:pt-7 pb-4">
                   <div class="flex items-center justify-between mb-4">
@@ -7471,7 +7553,7 @@
         return `
           <main id="active-chat-main" class="${mobileCls} absolute inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-white dark:bg-[#0B0B0D]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
             <!-- Minimalist Clean White & Black Upper Shelf -->
-            <header id="active-chat-header" data-chat-id="${escapeHtml(chat.id)}" style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 border-b border-black/[0.05] dark:border-white/[0.08] ${isPrivateMode ? 'bg-black/90' : 'bg-white/75 dark:bg-[#09090C]/75'} backdrop-blur-2xl shadow-[0_8px_28px_-14px_rgba(9,9,12,0.14)]">
+            <header id="active-chat-header" data-chat-id="${escapeHtml(chat.id)}" style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 ${isPrivateMode ? 'bg-black/90' : 'bg-white/75 dark:bg-[#09090C]/75'} backdrop-blur-2xl shadow-[0_8px_28px_-14px_rgba(9,9,12,0.14)]">
               <div class="flex items-center gap-3 min-w-0">
                 <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition ${isPrivateMode ? 'bg-white/15 text-white hover:bg-white/20 border border-white/15' : 'glass-pill text-ink dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black'}">
                   ${icon('back', 'w-5 h-5')}
@@ -8044,7 +8126,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         const vaultPhotos = (state.security && Array.isArray(state.security.shavloVaultItems)) ? state.security.shavloVaultItems : [];
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20 border-b border-black/[0.06] dark:border-white/[0.08]">
+            <div class="shrink-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] z-20">
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-[max(1rem,env(safe-area-inset-top))] pb-3.5 flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <button type="button" data-action="close-secret-vault-window" title="Back to Account" class="w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white flex items-center justify-center shrink-0 transition">
@@ -8131,17 +8213,103 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         `;
       }
 
+      function renderRoomsTab() {
+        const youPhoto = safeImgUrl(state.userProfile && state.userProfile.avatarUrl);
+        const net = getNetwork();
+        const topic = ui.openRoomTopic || 'For You';
+        const topics = ['For You', 'Tech', 'Music', 'Chill', 'Debate'];
+        const liveRooms = (Array.isArray(net.openRooms) ? net.openRooms : [])
+          .filter(r => r && r.is_live !== false)
+          .filter(r => topic === 'For You' || String(r.topic || '').toLowerCase() === topic.toLowerCase());
+        return `
+          <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl z-20">
+              <div class="md:hidden">${renderTopBrandHeader(false)}</div>
+              <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-2.5 md:pt-7 pb-3">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                  <h1 data-action="scroll-top" data-target="rooms-scroll" title="Tap to scroll to top" class="title-display text-[34px] sm:text-[38px] font-extrabold tracking-[-0.035em] leading-[1.08] text-ink dark:text-white cursor-pointer select-none">Rooms</h1>
+                  <div class="flex items-center gap-2">
+                    <button type="button" data-action="open-modal" data-modal="privateRoomModal" title="Join Private Code Room" class="h-10 px-3.5 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[12.5px] font-bold text-ink dark:text-white hover:opacity-85 transition">
+                      Code Room
+                    </button>
+                    <button type="button" data-action="nav" data-nav="you" title="You &amp; Settings" class="inline-flex items-center gap-1.5 pl-1 pr-3 py-1 rounded-full glass-pill hover:scale-[1.03] active:scale-95 transition">
+                      <span class="rounded-full p-[1.5px] border-[2px] border-[#C6A76D] shrink-0">
+                        ${renderAvatar(getInitial(state.userProfile.name), youPhoto, 'w-7 h-7 text-[11px]', 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]')}
+                      </span>
+                      <span class="text-[12.5px] font-bold text-ink dark:text-white">You</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  ${topics.map(tp => `
+                    <button type="button" data-action="room-topic" data-topic="${tp}" class="px-4 py-1.5 rounded-full text-[12.5px] font-semibold whitespace-nowrap transition ${topic === tp ? 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]' : 'bg-black/[0.05] dark:bg-white/[0.08] text-muted hover:text-ink dark:hover:text-white'}">${tp}</button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+            <main id="rooms-scroll" data-scroll-host="rooms-scroll" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-5 sm:px-8 pt-2 pb-36 md:pb-16">
+              <div class="w-full max-w-4xl mx-auto space-y-3.5">
+                ${liveRooms.length === 0 ? `
+                  <div class="py-12 px-6 text-center rounded-[30px] bg-white dark:bg-[#111114] border border-black/[0.05] dark:border-white/[0.08] space-y-2.5">
+                    <div class="w-12 h-12 mx-auto rounded-2xl bg-[#C6A76D]/15 text-[#C6A76D] flex items-center justify-center">
+                      <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                    </div>
+                    <div class="title-display text-[17px] font-bold">No live rooms right now</div>
+                    <p class="text-[13px] text-muted max-w-[260px] mx-auto">Start an Open Mic room so anyone on shavlo can drop in and speak live.</p>
+                  </div>
+                ` : liveRooms.map(rm => {
+                  const spks = Array.isArray(rm.speakers) ? rm.speakers : [];
+                  const lsts = Array.isArray(rm.listeners) ? rm.listeners : [];
+                  const people = [...spks, ...lsts];
+                  const extra = Math.max(0, people.length - 4);
+                  return `
+                    <div class="p-4 sm:p-5 rounded-[28px] bg-white dark:bg-[#131317] border border-black/[0.06] dark:border-white/[0.08] shadow-sm space-y-3">
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[#C6A76D]">
+                            <span class="w-2 h-2 rounded-full bg-[#C6A76D] animate-pulse"></span>
+                            <span>${escapeHtml(rm.topic || 'Open Mic')} • Live</span>
+                          </div>
+                          <h3 class="title-display text-[17px] font-bold text-ink dark:text-white mt-1 leading-snug">${escapeHtml(rm.title || 'Untitled Room')}</h3>
+                        </div>
+                        <button type="button" data-action="join-open-room" data-id="${escapeHtml(rm.id)}" class="px-4 py-2 rounded-full bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[12.5px] font-bold shrink-0 hover:opacity-90 transition">
+                          Join →
+                        </button>
+                      </div>
+                      <div class="flex items-center justify-between gap-3 pt-1">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <div class="flex -space-x-2">
+                            ${people.slice(0, 4).map(p => renderAvatar(getInitial(p.name || 'S'), p.avatarUrl || '', 'w-8 h-8 text-[11px] ring-2 ring-white dark:ring-[#131317]', 'bg-[#09090C] text-white')).join('')}
+                            ${extra > 0 ? `<span class="w-8 h-8 rounded-full bg-surface dark:bg-zinc-800 text-[11px] font-bold flex items-center justify-center ring-2 ring-white dark:ring-[#131317]">+${extra}</span>` : ''}
+                          </div>
+                          <span class="text-[12px] text-muted truncate">${spks.length} speaking • ${people.length} in room</span>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </main>
+            <div style="bottom:max(6.25rem, calc(env(safe-area-inset-bottom) + 4.8rem));" class="fixed left-1/2 -translate-x-1/2 z-20 md:bottom-6">
+              <button type="button" data-action="open-modal" data-modal="hostOpenRoom" class="px-6 py-3 rounded-full bg-[#C6A76D] hover:opacity-95 text-[#09090C] text-[14px] font-extrabold shadow-[0_14px_32px_-8px_rgba(198,167,109,0.75)] inline-flex items-center gap-2 active:scale-95 transition">
+                <span>+ Host a Room</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
       function renderYouTab() {
         const seedWords = state.userProfile.seedWords || DEMO_SEED;
         if (ui.secretVaultUnlocked && ui.secretVaultWindowOpen) return renderSecretVaultWindow(seedWords);
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
-            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl border-b border-black/[0.04] dark:border-white/[0.06] z-20">
+            <div class="shrink-0 bg-[#FAFAFC]/85 dark:bg-[#0B0B0D]/85 backdrop-blur-xl z-20">
               <div class="md:hidden">${renderTopBrandHeader(false)}</div>
               <div class="w-full max-w-4xl mx-auto px-5 sm:px-8 pt-1 md:pt-7 pb-2.5">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3">
-                    <button type="button" data-action="nav" data-nav="messages" title="Back to Chats" class="md:hidden w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white flex items-center justify-center transition-all duration-300 hover:scale-105 hover:bg-ink hover:text-white dark:hover:bg-white dark:hover:text-ink">
+                    <button type="button" data-action="nav" data-nav="rooms" title="Back to Rooms" class="md:hidden w-10 h-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-ink dark:text-white flex items-center justify-center transition-all duration-300 hover:scale-105 hover:bg-ink hover:text-white dark:hover:bg-white dark:hover:text-ink">
                       ${icon('back', 'w-5 h-5')}
                     </button>
                     <h1 class="title-display text-[34px] sm:text-[38px] font-extrabold tracking-[-0.035em] leading-[1.08] text-ink dark:text-white">You</h1>
@@ -10028,6 +10196,28 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               ` : ''}
             </div>
           `;
+        } else if (ui.modal === 'hostOpenRoom') {
+          inner = `
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h3 class="title-display font-bold text-[19px]">Host Open Mic Room</h3>
+                <p class="text-[12px] text-muted">Open to anyone on shavlo</p>
+              </div>
+              <button type="button" data-action="close-modal" class="p-1.5 rounded-full hover:bg-surface text-muted">${icon('close', 'w-4 h-4')}</button>
+            </div>
+            <form id="host-open-room-form" class="space-y-3">
+              <input name="title" type="text" required maxlength="80" placeholder="What do you want to talk about?" class="w-full h-11 px-4 rounded-2xl bg-surface dark:bg-zinc-900 text-[14.5px] font-medium focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/50" />
+              <select name="topic" class="w-full h-11 px-4 rounded-2xl bg-surface dark:bg-zinc-900 text-[13.5px] font-semibold focus:outline-none">
+                <option value="Chill">Chill</option>
+                <option value="Tech">Tech</option>
+                <option value="Music">Music</option>
+                <option value="Debate">Debate</option>
+              </select>
+              <button type="submit" class="w-full py-3 rounded-full bg-[#C6A76D] text-[#09090C] text-[14px] font-extrabold hover:opacity-90 transition">
+                Go Live Now
+              </button>
+            </form>
+          `;
         } else if (ui.modal === 'privateRoomModal') {
           inner = `
             <div class="flex items-center justify-between mb-3">
@@ -10339,13 +10529,23 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
         if (remoteMediaStream) {
           const rvid = document.getElementById('remote-vc-video');
-          const hasLiveVid = remoteMediaStream.getVideoTracks().some(t => t.readyState === 'live' && !t.muted);
+          const hasVidTrack = remoteMediaStream.getVideoTracks().length > 0;
           if (rvid) {
-            if (rvid.srcObject !== remoteMediaStream) { rvid.srcObject = remoteMediaStream; rvid.play().catch(() => {}); }
-            rvid.classList.toggle('opacity-0', !hasLiveVid && remoteMediaStream.getVideoTracks().length === 0);
+            rvid.setAttribute('playsinline', '');
+            rvid.setAttribute('webkit-playsinline', '');
+            if (rvid.srcObject !== remoteMediaStream) {
+              rvid.srcObject = remoteMediaStream;
+              rvid.onloadedmetadata = () => { rvid.play().catch(() => {}); };
+            }
+            if (hasVidTrack) {
+              rvid.classList.remove('opacity-0');
+              rvid.play().catch(() => {});
+            } else {
+              rvid.classList.add('opacity-0');
+            }
           }
           const ph = document.getElementById('call-remote-placeholder');
-          if (ph && remoteMediaStream.getVideoTracks().length > 0) ph.classList.add('hidden');
+          if (ph) ph.classList.toggle('hidden', hasVidTrack);
           const raud = document.getElementById('remote-vc-audio');
           if (raud) {
             raud.muted = Boolean(rvid);
@@ -10588,6 +10788,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (state.activeNav === 'updates' || state.activeNav === 'friends') mainView = renderUpdatesTab();
         else if (state.activeNav === 'groups') mainView = renderGroupsTab();
         else if (state.activeNav === 'calls') mainView = renderCallsTab();
+        else if (state.activeNav === 'rooms') mainView = renderRoomsTab();
         else if (state.activeNav === 'you') mainView = renderYouTab();
         else mainView = renderMessagesTab();
 
@@ -12062,6 +12263,21 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           stopShavloGame();
         } else if (action === 'game-ctrl') {
           handleGameControl(btn.dataset.ctrl);
+        } else if (action === 'room-topic') {
+          ui.openRoomTopic = btn.dataset.topic || 'For You';
+          render();
+        } else if (action === 'join-open-room') {
+          joinOpenRoom(btn.dataset.id);
+        } else if (action === 'open-room-mic') {
+          toggleOpenRoomMic();
+        } else if (action === 'open-room-hand') {
+          raiseOpenRoomHand();
+        } else if (action === 'open-room-promote') {
+          promoteOpenRoomListener(btn.dataset.id);
+        } else if (action === 'open-room-leave') {
+          leaveOpenRoom(false);
+        } else if (action === 'open-room-end') {
+          leaveOpenRoom(true);
         } else if (action === 'split-mode') {
           ui.splitMode = btn.dataset.mode || 'equal';
           renderModal();
@@ -12793,6 +13009,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             ui.pinError = 'Incorrect PIN';
             renderLockOverlay();
           }
+        } else if (e.target.id === 'host-open-room-form') {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          createAndJoinOpenRoom(String(fd.get('title') || '').trim(), String(fd.get('topic') || 'Chill'));
         } else if (e.target.id === 'split-form') {
           e.preventDefault();
           const fd = new FormData(e.target);
@@ -14657,6 +14877,295 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           }
         }
       });
+
+
+      let _openRoomStream = null;
+      let _openRoomMuted = false;
+      const _openRoomPeers = {};
+      let _lastOpenRoomRenderSig = '';
+
+      function broadcastOpenRoomFast(rm) {
+        if (!rm || !supaRealtimeChan) return;
+        try { supaRealtimeChan.send({ type: 'broadcast', event: 'open_room_fast', payload: rm }); } catch (_) {}
+      }
+
+      function stopOpenRoomMic() {
+        if (_openRoomStream) {
+          try { _openRoomStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+          _openRoomStream = null;
+        }
+        Object.keys(_openRoomPeers).forEach(pid => {
+          try { _openRoomPeers[pid].close(); } catch (_) {}
+          delete _openRoomPeers[pid];
+        });
+        document.querySelectorAll('audio[data-or-audio]').forEach(el => el.remove());
+      }
+
+      function getOrCreateOpenRoomPc(peerId, roomId) {
+        if (_openRoomPeers[peerId]) return _openRoomPeers[peerId];
+        const pc = new RTCPeerConnection({ iceServers: getIceServers(), iceCandidatePoolSize: 6, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
+        _openRoomPeers[peerId] = pc;
+        if (_openRoomStream) {
+          _openRoomStream.getTracks().forEach(t => pc.addTrack(t, _openRoomStream));
+        }
+        pc.onicecandidate = (ev) => {
+          if (ev.candidate && supaRealtimeChan) {
+            try { supaRealtimeChan.send({ type: 'broadcast', event: 'open_room_rtc', payload: { roomId, fromId: activeVaultId, toId: peerId, candidate: ev.candidate } }); } catch (_) {}
+          }
+        };
+        pc.ontrack = (ev) => {
+          let aud = document.querySelector(`audio[data-or-audio="${CSS.escape(peerId)}"]`);
+          if (!aud) {
+            aud = document.createElement('audio');
+            aud.setAttribute('data-or-audio', peerId);
+            aud.autoplay = true;
+            aud.playsInline = true;
+            document.body.appendChild(aud);
+          }
+          if (ev.streams && ev.streams[0]) aud.srcObject = ev.streams[0];
+          aud.play().catch(() => {});
+        };
+        return pc;
+      }
+
+      async function handleOpenRoomRtc(p) {
+        if (!p || !ui.activeOpenRoomId || p.roomId !== ui.activeOpenRoomId) return;
+        if (p.toId && p.toId !== activeVaultId) return;
+        if (p.fromId === activeVaultId) return;
+        const pc = getOrCreateOpenRoomPc(p.fromId, p.roomId);
+        try {
+          if (p.hello && _openRoomStream) {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            supaRealtimeChan.send({ type: 'broadcast', event: 'open_room_rtc', payload: { roomId: p.roomId, fromId: activeVaultId, toId: p.fromId, sdp: pc.localDescription } });
+          } else if (p.sdp) {
+            await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
+            if (p.sdp.type === 'offer') {
+              const ans = await pc.createAnswer();
+              await pc.setLocalDescription(ans);
+              supaRealtimeChan.send({ type: 'broadcast', event: 'open_room_rtc', payload: { roomId: p.roomId, fromId: activeVaultId, toId: p.fromId, sdp: pc.localDescription } });
+            }
+          } else if (p.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(p.candidate));
+          }
+        } catch (_) {}
+      }
+
+      async function createAndJoinOpenRoom(title, topic) {
+        if (!title || !activeVaultId) return;
+        try {
+        const roomId = 'or_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const me = {
+          id: activeVaultId,
+          name: (state.userProfile && state.userProfile.name) || 'Host',
+          avatarUrl: safeImgUrl(state.userProfile && state.userProfile.avatarUrl) || '',
+          muted: false
+        };
+        const row = {
+          id: roomId,
+          title,
+          topic: topic || 'Chill',
+          host_id: activeVaultId,
+          host_name: me.name,
+          host_avatar: me.avatarUrl,
+          speakers: [me],
+          listeners: [],
+          is_live: true,
+          created_at: Date.now()
+        };
+        const net = getNetwork();
+        net.openRooms = [row, ...(Array.isArray(net.openRooms) ? net.openRooms : [])];
+        saveNetwork(net, 'open_room_create');
+        ui.modal = null;
+        ui.activeOpenRoomId = roomId;
+        _openRoomMuted = false;
+        renderModal();
+        render();
+        renderOpenRoomStage();
+        broadcastOpenRoomFast(row);
+        supaWriteReliable('shavlo_open_rooms', 'POST', '?on_conflict=id', row);
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            _openRoomStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          }
+        } catch (_) {}
+        } catch (err) {
+          showToast('Could not start room');
+        }
+      }
+
+      function joinOpenRoom(roomId) {
+        const net = getNetwork();
+        const rm = (net.openRooms || []).find(r => r.id === roomId);
+        if (!rm || !activeVaultId) return;
+        const me = {
+          id: activeVaultId,
+          name: (state.userProfile && state.userProfile.name) || 'Listener',
+          avatarUrl: safeImgUrl(state.userProfile && state.userProfile.avatarUrl) || '',
+          handRaised: false
+        };
+        rm.speakers = Array.isArray(rm.speakers) ? rm.speakers : [];
+        rm.listeners = Array.isArray(rm.listeners) ? rm.listeners : [];
+        if (!rm.speakers.some(s => s.id === activeVaultId) && !rm.listeners.some(l => l.id === activeVaultId)) {
+          rm.listeners.push(me);
+          saveNetwork(net, 'open_room_join');
+          broadcastOpenRoomFast(rm);
+          supaWriteReliable('shavlo_open_rooms', 'PATCH', `?id=eq.${encodeURIComponent(roomId)}`, { listeners: rm.listeners });
+        }
+        ui.activeOpenRoomId = roomId;
+        _openRoomMuted = true;
+        renderOpenRoomStage();
+        if (supaRealtimeChan) {
+          try { supaRealtimeChan.send({ type: 'broadcast', event: 'open_room_rtc', payload: { roomId, fromId: activeVaultId, hello: true } }); } catch (_) {}
+        }
+      }
+
+      async function toggleOpenRoomMic() {
+        const net = getNetwork();
+        const rm = (net.openRooms || []).find(r => r.id === ui.activeOpenRoomId);
+        if (!rm) return;
+        const sp = (rm.speakers || []).find(s => s.id === activeVaultId);
+        if (!sp) return;
+        _openRoomMuted = !_openRoomMuted;
+        sp.muted = _openRoomMuted;
+        if (!_openRoomMuted && !_openRoomStream) {
+          try {
+            _openRoomStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            Object.values(_openRoomPeers).forEach(pc => _openRoomStream.getTracks().forEach(t => pc.addTrack(t, _openRoomStream)));
+          } catch (_) {}
+        }
+        if (_openRoomStream) _openRoomStream.getAudioTracks().forEach(t => { t.enabled = !_openRoomMuted; });
+        saveNetwork(net, 'open_room_mic');
+        broadcastOpenRoomFast(rm);
+        supaWriteReliable('shavlo_open_rooms', 'PATCH', `?id=eq.${encodeURIComponent(rm.id)}`, { speakers: rm.speakers });
+        renderOpenRoomStage();
+      }
+
+      function raiseOpenRoomHand() {
+        const net = getNetwork();
+        const rm = (net.openRooms || []).find(r => r.id === ui.activeOpenRoomId);
+        if (!rm) return;
+        const lst = (rm.listeners || []).find(l => l.id === activeVaultId);
+        if (!lst) return;
+        lst.handRaised = !lst.handRaised;
+        saveNetwork(net, 'open_room_hand');
+        broadcastOpenRoomFast(rm);
+        supaWriteReliable('shavlo_open_rooms', 'PATCH', `?id=eq.${encodeURIComponent(rm.id)}`, { listeners: rm.listeners });
+        renderOpenRoomStage();
+        showToast(lst.handRaised ? 'Hand raised ✋' : 'Hand lowered');
+      }
+
+      function promoteOpenRoomListener(uid) {
+        const net = getNetwork();
+        const rm = (net.openRooms || []).find(r => r.id === ui.activeOpenRoomId);
+        if (!rm || rm.host_id !== activeVaultId) return;
+        const idx = (rm.listeners || []).findIndex(l => l.id === uid);
+        if (idx < 0) return;
+        const [person] = rm.listeners.splice(idx, 1);
+        rm.speakers = rm.speakers || [];
+        rm.speakers.push({ id: person.id, name: person.name, avatarUrl: person.avatarUrl || '', muted: false });
+        saveNetwork(net, 'open_room_promote');
+        broadcastOpenRoomFast(rm);
+        supaWriteReliable('shavlo_open_rooms', 'PATCH', `?id=eq.${encodeURIComponent(rm.id)}`, { speakers: rm.speakers, listeners: rm.listeners });
+        renderOpenRoomStage();
+      }
+
+      function leaveOpenRoom(endForAll) {
+        const roomId = ui.activeOpenRoomId;
+        ui.activeOpenRoomId = null;
+        _lastOpenRoomRenderSig = '';
+        stopOpenRoomMic();
+        const net = getNetwork();
+        const rm = (net.openRooms || []).find(r => r.id === roomId);
+        if (rm) {
+          if (endForAll || rm.host_id === activeVaultId) {
+            rm.is_live = false;
+            net.openRooms = (net.openRooms || []).filter(r => r.id !== roomId);
+            broadcastOpenRoomFast({ id: roomId, is_live: false });
+            supaWriteReliable('shavlo_open_rooms', 'PATCH', `?id=eq.${encodeURIComponent(roomId)}`, { is_live: false });
+          } else {
+            rm.speakers = (rm.speakers || []).filter(s => s.id !== activeVaultId);
+            rm.listeners = (rm.listeners || []).filter(l => l.id !== activeVaultId);
+            broadcastOpenRoomFast(rm);
+            supaWriteReliable('shavlo_open_rooms', 'PATCH', `?id=eq.${encodeURIComponent(roomId)}`, { speakers: rm.speakers, listeners: rm.listeners });
+          }
+          saveNetwork(net, 'open_room_leave');
+        }
+        renderOpenRoomStage();
+        render();
+      }
+
+      function renderOpenRoomStage() {
+        const root = document.getElementById('open-room-root');
+        if (!root) return;
+        if (!ui.activeOpenRoomId || !state) { _lastOpenRoomRenderSig = ''; if (root.innerHTML !== '') root.innerHTML = ''; return; }
+        const net = getNetwork();
+        const rm = (net.openRooms || []).find(r => r.id === ui.activeOpenRoomId);
+        if (!rm) { _lastOpenRoomRenderSig = ''; if (root.innerHTML !== '') root.innerHTML = ''; return; }
+        const sig = JSON.stringify({ id: rm.id, s: rm.speakers, l: rm.listeners, m: _openRoomMuted });
+        if (sig === _lastOpenRoomRenderSig && root.firstElementChild) return;
+        _lastOpenRoomRenderSig = sig;
+        const isHost = rm.host_id === activeVaultId;
+        const spks = Array.isArray(rm.speakers) ? rm.speakers : [];
+        const lsts = Array.isArray(rm.listeners) ? rm.listeners : [];
+        const amSpeaker = spks.some(s => s.id === activeVaultId);
+        const myLst = lsts.find(l => l.id === activeVaultId);
+        root.innerHTML = `
+          <div class="fixed inset-0 z-[78] bg-[#09090C] text-white flex flex-col justify-between p-5" style="padding-top:max(1.25rem,env(safe-area-inset-top)); padding-bottom:max(1.5rem,env(safe-area-inset-bottom));">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-[#C6A76D]">${escapeHtml(rm.topic || 'Open Mic')} • Live Stage</span>
+                <h2 class="title-display text-[22px] font-extrabold leading-tight mt-0.5">${escapeHtml(rm.title)}</h2>
+              </div>
+              <button type="button" data-action="open-room-leave" class="px-4 py-2 rounded-full bg-white/10 text-[12.5px] font-bold shrink-0">Leave quietly</button>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto thin-scroll py-6 space-y-6">
+              <div>
+                <div class="text-[11.5px] font-bold uppercase tracking-wider text-white/50 mb-3">Speakers (${spks.length})</div>
+                <div class="grid grid-cols-3 sm:grid-cols-4 gap-4">
+                  ${spks.map(s => `
+                    <div class="flex flex-col items-center gap-1.5 text-center">
+                      <div class="relative rounded-full p-[2.5px] ${!s.muted ? 'border-[2.5px] border-[#C6A76D]' : 'border border-white/20'}">
+                        ${renderAvatar(getInitial(s.name || 'S'), s.avatarUrl || '', 'w-16 h-16 text-[18px]', 'bg-white/15 text-white')}
+                        <span class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full ${s.muted ? 'bg-zinc-800 text-white/70' : 'bg-[#C6A76D] text-[#09090C]'} flex items-center justify-center text-[11px] font-bold shadow">${s.muted ? '🔇' : '🎙️'}</span>
+                      </div>
+                      <span class="text-[12.5px] font-semibold truncate max-w-full">${escapeHtml(s.name)}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+              <div>
+                <div class="text-[11.5px] font-bold uppercase tracking-wider text-white/50 mb-3">Listeners (${lsts.length})</div>
+                ${lsts.length === 0 ? `<p class="text-[12.5px] text-white/45">Open to anyone on shavlo — waiting for listeners.</p>` : `
+                  <div class="grid grid-cols-4 sm:grid-cols-6 gap-3">
+                    ${lsts.map(l => `
+                      <button type="button" ${isHost ? `data-action="open-room-promote" data-id="${escapeHtml(l.id)}" title="Tap to bring on stage"` : ''} class="flex flex-col items-center gap-1 text-center">
+                        <div class="relative">
+                          ${renderAvatar(getInitial(l.name || 'L'), l.avatarUrl || '', 'w-12 h-12 text-[14px]', 'bg-white/10 text-white')}
+                          ${l.handRaised ? `<span class="absolute -top-1 -right-1 text-[14px]">✋</span>` : ''}
+                        </div>
+                        <span class="text-[11px] text-white/75 truncate max-w-full">${escapeHtml(l.name)}</span>
+                      </button>
+                    `).join('')}
+                  </div>
+                `}
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-3 pt-3 border-t border-white/10">
+              ${isHost ? `<button type="button" data-action="open-room-end" class="px-5 py-3 rounded-full bg-[#FF3B30] text-white text-[13px] font-bold">End Room</button>` : `<span></span>`}
+              ${amSpeaker ? `
+                <button type="button" data-action="open-room-mic" class="px-6 py-3 rounded-full ${_openRoomMuted ? 'bg-white/15 text-white' : 'bg-[#C6A76D] text-[#09090C]'} text-[13.5px] font-extrabold">
+                  ${_openRoomMuted ? 'Unmute Mic' : 'Mic Live 🎙️'}
+                </button>
+              ` : `
+                <button type="button" data-action="open-room-hand" class="px-6 py-3 rounded-full ${myLst && myLst.handRaised ? 'bg-[#C6A76D] text-[#09090C]' : 'bg-white/15 text-white'} text-[13.5px] font-bold">
+                  ${myLst && myLst.handRaised ? 'Hand Raised ✋' : 'Raise Hand ✋'}
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }
 
       let _gameSession = null;
       let _gameTimer = null;
