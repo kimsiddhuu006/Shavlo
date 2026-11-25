@@ -130,11 +130,8 @@
       background: transparent;
     }
     @keyframes typingOrbit {
-      0% { transform: translateY(0px) rotate(0deg) scale(1); filter: drop-shadow(0 0 4px rgba(198, 167, 109, 0.45)); }
-      25% { transform: translateY(-2.5px) rotate(90deg) scale(1.07); filter: drop-shadow(0 0 9px rgba(198, 167, 109, 0.85)); }
-      50% { transform: translateY(0px) rotate(180deg) scale(1.02); filter: drop-shadow(0 0 5px rgba(198, 167, 109, 0.55)); }
-      75% { transform: translateY(1.5px) rotate(270deg) scale(1.08); filter: drop-shadow(0 0 10px rgba(198, 167, 109, 0.88)); }
-      100% { transform: translateY(0px) rotate(360deg) scale(1); filter: drop-shadow(0 0 4px rgba(198, 167, 109, 0.45)); }
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
     .ring-second-layer {
       position: absolute;
@@ -146,7 +143,8 @@
       will-change: transform, opacity;
     }
     .ring-second-dotted {
-      animation: typingOrbit 2.8s ease-in-out infinite;
+      animation: typingOrbit 4.5s linear infinite;
+      filter: drop-shadow(0 0 7px rgba(198, 167, 109, 0.72));
     }
     [data-msg-side="me"] + [data-msg-side="other"],
     [data-msg-side="other"] + [data-msg-side="me"] {
@@ -663,7 +661,6 @@
       const VAULTS_KEY = 'samvaad_vaults_v4';
       const NETWORK_KEY = 'samvaad_network_v4';
       const SESSION_KEY = 'samvaad_active_session_v4';
-      const DEMO_SEED = ['lotus', 'saffron', 'river', 'temple', 'monsoon', 'banyan', 'silver', 'jasmine'];
 
       const WORDLIST = [
         'lotus','saffron','river','temple','monsoon','banyan','silver','jasmine','horizon','lantern','marble','sunrise',
@@ -1570,7 +1567,7 @@
         if (tool === 'eraser') {
           ctx.globalCompositeOperation = 'destination-out';
           ctx.strokeStyle = 'rgba(0,0,0,1)';
-          ctx.lineWidth = Math.max(14, Number(size || 5) * 3.2);
+          ctx.lineWidth = Math.max(22, Number(size || 5) * 4.5);
         } else {
           ctx.globalCompositeOperation = 'source-over';
           ctx.strokeStyle = getSketchColorHex(color);
@@ -1756,9 +1753,10 @@
         }
         ui.sketchActive = true;
         ui.sketchChatId = chatId;
-        ui.sketchTool = ui.sketchTool || 'pen';
-        ui.sketchColor = ui.sketchColor || 'adaptive';
-        ui.sketchSize = ui.sketchSize || 5;
+        ui.sketchMenuOpen = false;
+        ui.sketchTool = 'pen';
+        ui.sketchColor = '#FFFFFF';
+        ui.sketchSize = 4.5;
         triggerHaptic(12);
         showToast('Live Sketch ON • Draw over chat');
         render();
@@ -1767,6 +1765,7 @@
       function stopLiveSketch() {
         ui.sketchActive = false;
         ui.sketchChatId = null;
+        ui.sketchMenuOpen = false;
         triggerHaptic(8);
         render();
       }
@@ -2013,7 +2012,7 @@
           syncOwnPresence(document.hidden);
           if (!document.hidden) {
             if (ui && ui.modal === 'upiLaunch' && ui.pendingUpiPay) checkPendingUpiSettlement();
-            if (getSupaCfg()) flushOutbox().then(() => syncWithSupabase());
+            if (getSupaCfg()) flushOutbox().then(() => syncWithSupabase(true));
           }
         }
       });
@@ -3280,7 +3279,6 @@
             hiddenChatIds: state.security.hiddenChatIds || {},
             secretChatIds: state.security.secretChatIds || {},
             hideWorldChat: Boolean(state.security.hideWorldChat),
-            airGestureCalls: state.security.airGestureCalls !== false,
             liveSketchEnabled: state.security.liveSketchEnabled !== false,
             permissionsPrompted: Boolean(state.security.permissionsPrompted),
             permissionsState: state.security.permissionsState || {},
@@ -3325,7 +3323,7 @@
           await flushOutbox();
           supaSyncTickCount += 1;
           const fetchUsers = forceFull || supaSyncTickCount === 1 || (supaSyncTickCount % 4 === 0);
-          const fetchStatuses = forceFull || supaSyncTickCount === 1 || (supaSyncTickCount % 2 === 0);
+          const fetchStatuses = true;
           const sinceTs = Math.max(0, lastSupaMsgCreatedAt - 15000);
           const msgQuery = (!forceFull && lastSupaMsgCreatedAt > 0)
             ? `?select=id,room_id,author_id,author_name,payload,created_at,expires_at&created_at=gt.${sinceTs}&order=created_at.asc&limit=150`
@@ -3338,7 +3336,7 @@
             supaFetch('shavlo_friendships', 'GET', `?select=id,user_a,user_b,since&or=(user_a.eq.${vidEnc},user_b.eq.${vidEnc})`),
             supaFetch('shavlo_groups', 'GET', '?select=id,code,name,description,creator_id,member_ids,admin_ids,created_at,expires_at'),
             supaFetch('shavlo_messages', 'GET', msgQuery),
-            fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=id,author_id,author_name,payload,expires_at&expires_at=gt.${Date.now()}`) : Promise.resolve(null),
+            fetchStatuses ? supaFetch('shavlo_statuses', 'GET', `?select=id,author_id,author_name,payload,expires_at&expires_at=gt.${Date.now()}`).catch(() => null) : Promise.resolve(null),
             fetchStatuses ? supaFetch('shavlo_status_views', 'GET', '?select=status_id,viewer_id,viewer_name').catch(() => []) : Promise.resolve(null),
             supaFetch('shavlo_calls', 'GET', `?select=room_id,caller_id,caller_name,callee_id,callee_name,call_type,status,started_at&or=(caller_id.eq.${vidEnc},callee_id.eq.${vidEnc})`).catch(() => []),
             supaFetch('shavlo_read_receipts', 'GET', '?select=room_id,user_id,last_delivered_at,last_read_at').catch(() => []),
@@ -3528,17 +3526,18 @@
               if (isOpenNow) markRoomRead(rid); else markRoomDelivered(rid);
             }
           });
-          if (statuses !== null) {
-            const _recentLocalSt = (net.statuses || []).filter(s => s && s.id && (Date.now() - Number(s.createdAt || 0)) < 15000 && !(statuses || []).some(r => r.id === s.id));
+          if (Array.isArray(statuses)) {
+            const _prevStIds = new Set((net.statuses || []).map(s => s && s.id).filter(Boolean));
+            const _recentLocalSt = (net.statuses || []).filter(s => s && s.id && (Date.now() - Number(s.createdAt || 0)) < 15000 && !statuses.some(r => r.id === s.id));
             const viewMap = new Map();
             (Array.isArray(statusViewsRows) ? statusViewsRows : []).forEach(v => {
               if (!v || !v.status_id || !v.viewer_id) return;
               if (!viewMap.has(v.status_id)) viewMap.set(v.status_id, []);
               viewMap.get(v.status_id).push(v);
             });
-            net.statuses = [..._recentLocalSt, ...(statuses || []).map(st => {
+            net.statuses = [..._recentLocalSt, ...statuses.map(st => {
               const merged = Object.assign({}, st.payload, {
-                id: st.id, authorId: st.author_id, authorName: st.author_name, expiresAt: st.expires_at
+                id: st.id, authorId: st.author_id, authorName: st.author_name, expiresAt: Number(st.expires_at || (st.payload && st.payload.expiresAt) || 0)
               });
               merged.seenBy = Array.isArray(merged.seenBy) ? [...merged.seenBy] : [];
               merged.seenNames = merged.seenNames || {};
@@ -3548,6 +3547,12 @@
               });
               return merged;
             })];
+            if (supaSyncTickCount > 1 && state && state.activeNav !== 'status') {
+              const newFriendSt = net.statuses.find(s => s && s.id && s.authorId && s.authorId !== activeVaultId && !_prevStIds.has(s.id) && (!s.expiresAt || Number(s.expiresAt) > Date.now()));
+              if (newFriendSt && typeof showToast === 'function') {
+                showToast(`${newFriendSt.authorName || 'Friend'} posted a new 24h status`);
+              }
+            }
           }
           net.activeCalls = {};
           (calls || []).forEach(c => {
@@ -3672,7 +3677,6 @@
               }
               if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
               if (typeof pr.hideWorldChat === 'boolean') { state.security.hideWorldChat = pr.hideWorldChat; if (pr.hideWorldChat) ui.worldChatOpen = false; }
-              if (typeof pr.airGestureCalls === 'boolean') state.security.airGestureCalls = pr.airGestureCalls;
               if (typeof pr.liveSketchEnabled === 'boolean') { state.security.liveSketchEnabled = pr.liveSketchEnabled; if (!pr.liveSketchEnabled && ui.sketchActive) ui.sketchActive = false; }
               if (typeof pr.permissionsPrompted === 'boolean') state.security.permissionsPrompted = pr.permissionsPrompted;
               if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
@@ -3929,7 +3933,6 @@
                       }
                       if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
                       if (typeof pr.hideWorldChat === 'boolean') { state.security.hideWorldChat = pr.hideWorldChat; if (pr.hideWorldChat) ui.worldChatOpen = false; }
-              if (typeof pr.airGestureCalls === 'boolean') state.security.airGestureCalls = pr.airGestureCalls;
               if (typeof pr.liveSketchEnabled === 'boolean') { state.security.liveSketchEnabled = pr.liveSketchEnabled; if (!pr.liveSketchEnabled && ui.sketchActive) ui.sketchActive = false; }
                       if (typeof pr.permissionsPrompted === 'boolean') state.security.permissionsPrompted = pr.permissionsPrompted;
                       if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
@@ -4627,8 +4630,8 @@
 
       window.addEventListener('online', () => {
         if (activeVaultId && state && getSupaCfg()) {
-          flushOutbox().then(() => syncWithSupabase());
-          showToast('Back online • Syncing messages');
+          flushOutbox().then(() => syncWithSupabase(true));
+          showToast('Back online • Syncing messages & statuses');
         }
       });
 
@@ -4935,7 +4938,7 @@
           (net.requests || []).length,
           (net.friendships || []).length,
           (net.groups || []).length,
-          (net.statuses || []).length,
+          (net.statuses || []).map(s => s && s.id).join(','),
           (state.unfriendNotices || []).length,
           (state.userProfile && state.userProfile.avatarUrl) || '',
           ui.activeCall ? (ui.activeCall.roomId + ':' + ui.activeCall.status) : ''
@@ -5426,7 +5429,7 @@
             .map(f => f.users.find(id => id !== activeVaultId))
         );
         const liveStatuses = (net.statuses || []).filter(st =>
-          st.expiresAt > now && (st.authorId === activeVaultId || myFriendIds.has(st.authorId))
+          Number(st.expiresAt || 0) > now && (st.authorId === activeVaultId || myFriendIds.has(st.authorId))
         );
         const samples = (state.sampleStatuses || []).filter(st => st.expiresAt > now);
         return [...liveStatuses, ...samples].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -5444,7 +5447,7 @@
 
       function postNew24hStatus(text, bg, photoUrl, videoUrl) {
         const clean = String(text || '').trim();
-        if (!clean && !photoUrl) { showToast('Add text or a photo for your status'); return; }
+        if (!clean && !photoUrl && !videoUrl) { showToast('Add text, a photo, or a video for your status'); return; }
         const now = Date.now();
         const net = getNetwork();
         net.statuses.unshift({
@@ -5474,20 +5477,29 @@
                   saveNetwork(getNetwork(), 'status_photo_cdn');
                 }
               }
+              if (stObj.videoUrl && stObj.videoUrl.startsWith('data:')) {
+                const vidCdnUrl = await uploadMediaToSupabaseStorage(stObj.videoUrl, 'statuses', 'mp4');
+                if (vidCdnUrl && /^https?:/i.test(vidCdnUrl)) {
+                  stObj.videoUrl = vidCdnUrl;
+                  saveNetwork(getNetwork(), 'status_video_cdn');
+                }
+              }
             } catch (_) {}
-            if (supaRealtimeChan) {
-              try {
-                supaRealtimeChan.send({
-                  type: 'broadcast',
-                  event: 'status_fast',
-                  payload: { id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name, payload: stObj, expires_at: stObj.expiresAt }
-                });
-              } catch (_) {}
+            finally {
+              if (supaRealtimeChan) {
+                try {
+                  supaRealtimeChan.send({
+                    type: 'broadcast',
+                    event: 'status_fast',
+                    payload: { id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name, payload: stObj, expires_at: stObj.expiresAt }
+                  });
+                } catch (_) {}
+              }
+              supaWriteReliable('shavlo_statuses', 'POST', '?on_conflict=id', {
+                id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name,
+                payload: stObj, expires_at: stObj.expiresAt
+              });
             }
-            supaWriteReliable('shavlo_statuses', 'POST', '?on_conflict=id', {
-              id: stObj.id, author_id: activeVaultId, author_name: state.userProfile.name,
-              payload: stObj, expires_at: stObj.expiresAt
-            });
           })();
         }
         ui.modal = null;
@@ -6369,12 +6381,11 @@
         const { vaultId, friendCode } = await deriveSeedIdentity(cleaned);
         const vaults = getAllVaults();
         if (!vaults[vaultId]) {
-          const isDemo = cleaned.join(' ') === DEMO_SEED.join(' ');
-          let cloudName = isDemo ? 'Kim siddhuu' : 'Member';
-          let cloudUpi = isDemo ? 'kim.siddhuu@okaxis' : `member.${vaultId.slice(0, 4).toLowerCase()}@okaxis`;
+          let cloudName = 'Member';
+          let cloudUpi = `member.${vaultId.slice(0, 4).toLowerCase()}@okaxis`;
           let cloudAvatar = '';
           let cloudCode = friendCode;
-          if (!isDemo && getSupaCfg()) {
+          if (getSupaCfg()) {
             try {
               const [rows, pRows] = await Promise.all([
                 supaFetch('shavlo_users', 'GET', `?vault_id=eq.${encodeURIComponent(vaultId)}&select=name,upi_id,avatar_url,friend_code,updated_at`),
@@ -7805,7 +7816,7 @@
           <form id="login-seed-form" class="space-y-3">
             <div class="flex items-center justify-between">
               <span class="title-display text-[13.5px] font-bold tracking-[-0.015em] text-ink dark:text-white">Enter 8-word seed</span>
-              <button type="button" data-action="fill-demo-seed" class="px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.08] hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black text-[12px] font-semibold text-ink dark:text-white transition">Fill Demo</button>
+
             </div>
             <p class="text-[12px] text-muted leading-snug">Paste all 8 words into Word #1 to auto-fill.</p>
             <div class="grid grid-cols-2 gap-2 w-full p-0.5">
@@ -8499,46 +8510,24 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <button type="button" data-action="toggle-block" data-id="${chat.id}" data-name="${escapeHtml(chat.name)}" class="px-3.5 py-1.5 rounded-full bg-white dark:bg-zinc-900 text-[12.5px] font-semibold text-ink dark:text-white shadow-sm hover:bg-brand-500 hover:text-white transition shrink-0">Unblock</button>
                 </div>
               ` : ui.sketchActive ? `
-                <div class="${isPrivateMode ? 'glass-dark-pill' : 'bg-white/80 dark:bg-[#14141B]/80 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.16]'} rounded-full px-2.5 py-1.5 flex items-center justify-between gap-1.5 shadow-lg overflow-x-auto no-scrollbar">
-                  <div class="flex items-center gap-1 shrink-0">
-                    <button type="button" data-action="sketch-tool" data-tool="pen" title="Pencil" class="w-8 h-8 rounded-full flex items-center justify-center transition ${ui.sketchTool !== 'eraser' ? 'bg-[#3F89F6] text-white shadow-sm' : 'text-ink dark:text-white hover:bg-black/5 dark:hover:bg-white/10'}">
-                      ${icon('edit', 'w-4 h-4')}
+                <div class="relative z-30 flex flex-col items-end gap-2.5 pointer-events-auto">
+                  ${ui.sketchMenuOpen ? `
+                    <button type="button" data-action="sketch-tool" data-tool="eraser" title="Eraser" class="w-12 h-12 rounded-full bg-black/45 dark:bg-white/[0.16] backdrop-blur-2xl border ${ui.sketchTool === 'eraser' ? 'border-white ring-2 ring-white/50' : 'border-white/35'} text-white flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_10px_24px_-6px_rgba(0,0,0,0.45)] active:scale-95 transition">
+                      ${icon('trash', 'w-5 h-5')}
                     </button>
-                    <button type="button" data-action="sketch-tool" data-tool="eraser" title="Eraser" class="w-8 h-8 rounded-full flex items-center justify-center transition ${ui.sketchTool === 'eraser' ? 'bg-[#3F89F6] text-white shadow-sm' : 'text-ink dark:text-white hover:bg-black/5 dark:hover:bg-white/10'}">
-                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+                    <button type="button" data-action="sketch-tool" data-tool="pen" title="Pencil" class="w-12 h-12 rounded-full bg-black/45 dark:bg-white/[0.16] backdrop-blur-2xl border ${ui.sketchTool !== 'eraser' ? 'border-white ring-2 ring-white/50' : 'border-white/35'} text-white flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_10px_24px_-6px_rgba(0,0,0,0.45)] active:scale-95 transition">
+                      ${icon('edit', 'w-5 h-5')}
                     </button>
-                  </div>
-                  <span class="w-px h-5 bg-black/10 dark:bg-white/15 shrink-0"></span>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    ${[
-                      { id: 'adaptive', cls: 'bg-[#09090C] dark:bg-white' },
-                      { id: '#3F89F6', cls: 'bg-[#3F89F6]' },
-                      { id: '#C6A76D', cls: 'bg-[#C6A76D]' },
-                      { id: '#FF3B30', cls: 'bg-[#FF3B30]' }
-                    ].map(c => `
-                      <button type="button" data-action="sketch-color" data-color="${c.id}" class="w-5 h-5 rounded-full ${c.cls} ${ui.sketchColor === c.id ? 'ring-2 ring-offset-2 ring-[#3F89F6] scale-110' : 'opacity-80 hover:opacity-100'} transition shrink-0"></button>
-                    `).join('')}
-                  </div>
-                  <span class="w-px h-5 bg-black/10 dark:bg-white/15 shrink-0"></span>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    ${[
-                      { sz: 2.5, dot: 'w-2 h-2', lbl: 'Thin' },
-                      { sz: 5, dot: 'w-3 h-3', lbl: 'Medium' },
-                      { sz: 9, dot: 'w-4 h-4', lbl: 'Bold' }
-                    ].map(s => `
-                      <button type="button" data-action="sketch-size" data-size="${s.sz}" title="${s.lbl}" class="w-6 h-6 rounded-full flex items-center justify-center ${Number(ui.sketchSize || 5) === s.sz ? 'bg-black/10 dark:bg-white/20' : 'hover:bg-black/5 dark:hover:bg-white/10'} transition">
-                        <span class="${s.dot} rounded-full bg-ink dark:bg-white"></span>
-                      </button>
-                    `).join('')}
-                  </div>
-                  <span class="w-px h-5 bg-black/10 dark:bg-white/15 shrink-0"></span>
-                  <div class="flex items-center gap-1 shrink-0">
-                    <button type="button" data-action="sketch-undo" title="Undo" class="px-2 py-1 rounded-full text-[11.5px] font-semibold text-ink dark:text-white hover:bg-black/5 dark:hover:bg-white/10 transition">Undo</button>
-                    <button type="button" data-action="sketch-clear" title="Clear" class="px-2 py-1 rounded-full text-[11.5px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-500/15 transition">Clear</button>
-                    <button type="button" data-action="stop-sketch" title="Close Sketch" class="w-7 h-7 rounded-full bg-black/[0.06] dark:bg-white/[0.12] text-ink dark:text-white flex items-center justify-center shrink-0">
-                      ${icon('close', 'w-3.5 h-3.5')}
-                    </button>
-                  </div>
+                  ` : ''}
+                  <button type="button" data-action="${ui.sketchMenuOpen ? 'stop-sketch' : 'toggle-sketch-menu'}" title="${ui.sketchMenuOpen ? 'Close Sketch' : 'Sketch Tools'}" class="w-12 h-12 rounded-full bg-black/45 dark:bg-white/[0.16] backdrop-blur-2xl border border-white/40 text-white flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.45),0_10px_28px_-6px_rgba(0,0,0,0.48)] active:scale-95 transition">
+                    ${ui.sketchMenuOpen ? icon('close', 'w-5 h-5') : `
+                      <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <circle cx="6.5" cy="12" r="1.85"/>
+                        <circle cx="12" cy="12" r="1.85"/>
+                        <circle cx="17.5" cy="12" r="1.85"/>
+                      </svg>
+                    `}
+                  </button>
                 </div>
               ` : ui.recordingVoice ? `
                 <div class="space-y-3">
@@ -9510,7 +9499,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }
 
       function renderYouTab() {
-        const seedWords = state.userProfile.seedWords || DEMO_SEED;
+        const seedWords = state.userProfile.seedWords || [];
         if (ui.secretVaultUnlocked && ui.secretVaultWindowOpen) return renderSecretVaultWindow(seedWords);
         return `
           <div class="fixed inset-0 md:static flex-1 flex flex-col h-full min-h-0 bg-[#FAFAFC] dark:bg-[#0B0B0D] overflow-hidden">
@@ -9829,13 +9818,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Hide the World chat button in Rooms</div>
                       </div>
                       <button type="button" data-action="toggle-hide-world-chat" class="px-4 py-1.5 rounded-full ${(state.security && state.security.hideWorldChat) ? 'bg-brand-500 text-white' : 'bg-surface text-muted'} text-[12.5px] font-semibold transition">${(state.security && state.security.hideWorldChat) ? 'On' : 'Off'}</button>
-                    </div>
-                    <div class="pt-3 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between">
-                      <div>
-                        <div class="title-display text-[15px] font-bold tracking-[-0.02em]">Air-Gesture Call Controls</div>
-                        <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Palm to answer/mute • Wave to end (on-device)</div>
-                      </div>
-                      <button type="button" data-action="toggle-air-gestures" class="px-4 py-1.5 rounded-full ${(state.security && state.security.airGestureCalls !== false) ? 'bg-brand-500 text-white' : 'bg-surface dark:bg-zinc-900 text-muted'} text-[12.5px] font-semibold transition">${(state.security && state.security.airGestureCalls !== false) ? 'On' : 'Off'}</button>
                     </div>
                     <div class="pt-3 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between">
                       <div>
@@ -12334,150 +12316,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         }
       }
 
-      let _airGestureTimer = null;
-      let _airGestureStream = null;
-      let _airGestureVideo = null;
-      let _airGesturePrevFrame = null;
-      let _airGestureCooldownUntil = 0;
-      let _airGesturePalmScore = 0;
-      let _airGestureWaveScore = 0;
-      let _airGestureWaveDir = 0;
-
-      function stopAirGestureEngine() {
-        clearInterval(_airGestureTimer);
-        _airGestureTimer = null;
-        _airGesturePrevFrame = null;
-        _airGesturePalmScore = 0;
-        _airGestureWaveScore = 0;
-        if (_airGestureStream) {
-          try { _airGestureStream.getTracks().forEach(t => t.stop()); } catch (_) {}
-          _airGestureStream = null;
-        }
-        _airGestureVideo = null;
-      }
-
-      async function startAirGestureEngine() {
-        if (!ui || !ui.activeCall || (state && state.security && state.security.airGestureCalls === false)) {
-          stopAirGestureEngine();
-          return;
-        }
-        if (_airGestureTimer) return;
-        const W = 48, H = 36;
-        const cvs = document.createElement('canvas');
-        cvs.width = W; cvs.height = H;
-        const ctx = cvs.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return;
-
-        const existingVid = document.getElementById('local-vc-video');
-        if (existingVid && existingVid.srcObject) {
-          _airGestureVideo = existingVid;
-        } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          try {
-            _airGestureStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 160, height: 120 }, audio: false });
-            const hiddenV = document.createElement('video');
-            hiddenV.muted = true;
-            hiddenV.playsInline = true;
-            hiddenV.srcObject = _airGestureStream;
-            await hiddenV.play().catch(() => {});
-            _airGestureVideo = hiddenV;
-          } catch (_) {
-            return;
-          }
-        }
-        if (!_airGestureVideo) return;
-
-        const updateHud = (pct, color, text) => {
-          const ring = document.getElementById('air-gesture-ring');
-          const lbl = document.getElementById('air-gesture-label');
-          if (ring) {
-            const C = 56.55;
-            ring.style.strokeDashoffset = String(C * (1 - Math.max(0, Math.min(1, pct))));
-            if (color) ring.setAttribute('stroke', color);
-          }
-          if (lbl && text) lbl.textContent = text;
-        };
-
-        _airGestureTimer = setInterval(() => {
-          if (!ui || !ui.activeCall) { stopAirGestureEngine(); return; }
-          const vid = (document.getElementById('local-vc-video') && document.getElementById('local-vc-video').srcObject) ? document.getElementById('local-vc-video') : _airGestureVideo;
-          if (!vid || vid.readyState < 2) return;
-          if (Date.now() < _airGestureCooldownUntil) return;
-
-          try { ctx.drawImage(vid, 0, 0, W, H); } catch (_) { return; }
-          const data = ctx.getImageData(0, 0, W, H).data;
-          const gray = new Uint8Array(W * H);
-          for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-            gray[j] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
-          }
-          if (!_airGesturePrevFrame) { _airGesturePrevFrame = gray; return; }
-
-          let leftMotion = 0, centerMotion = 0, rightMotion = 0;
-          for (let y = 4; y < H - 4; y++) {
-            for (let x = 2; x < W - 2; x++) {
-              const idx = y * W + x;
-              const diff = Math.abs(gray[idx] - _airGesturePrevFrame[idx]);
-              if (diff > 22) {
-                if (x < 16) leftMotion++;
-                else if (x < 32) centerMotion++;
-                else rightMotion++;
-              }
-            }
-          }
-          _airGesturePrevFrame = gray;
-
-          const total = leftMotion + centerMotion + rightMotion;
-          const curCall = ui.activeCall;
-          const defLabel = curCall.status === 'incoming' ? 'Palm: Answer • Wave: Decline' : 'Palm: Mute • Wave: End';
-
-          const latDiff = leftMotion - rightMotion;
-          if (Math.abs(latDiff) > 28 && total > 65) {
-            const dir = latDiff > 0 ? 1 : -1;
-            if (_airGestureWaveDir !== 0 && dir !== _airGestureWaveDir) {
-              _airGestureWaveScore = Math.min(1, _airGestureWaveScore + 0.36);
-            } else {
-              _airGestureWaveScore = Math.min(1, _airGestureWaveScore + 0.16);
-            }
-            _airGestureWaveDir = dir;
-            _airGesturePalmScore = Math.max(0, _airGesturePalmScore - 0.15);
-            updateHud(_airGestureWaveScore, '#FF3B30', curCall.status === 'incoming' ? 'Waving to Decline...' : 'Waving to End Call...');
-            if (_airGestureWaveScore >= 1) {
-              _airGestureCooldownUntil = Date.now() + 2500;
-              _airGestureWaveScore = 0;
-              triggerHaptic(18);
-              const endBtn = document.querySelector('[data-action="end-call"]');
-              if (endBtn) endBtn.click();
-              return;
-            }
-          } else if (centerMotion > 28 && total < 220 && Math.abs(latDiff) < 30) {
-            _airGesturePalmScore = Math.min(1, _airGesturePalmScore + 0.16);
-            _airGestureWaveScore = Math.max(0, _airGestureWaveScore - 0.15);
-            updateHud(_airGesturePalmScore, '#3F89F6', curCall.status === 'incoming' ? 'Hold Palm to Answer...' : (curCall.muted ? 'Hold Palm to Unmute...' : 'Hold Palm to Mute...'));
-            if (_airGesturePalmScore >= 1) {
-              _airGestureCooldownUntil = Date.now() + 2200;
-              _airGesturePalmScore = 0;
-              triggerHaptic(14);
-              if (curCall.status === 'incoming') {
-                const accBtn = document.querySelector('[data-action="accept-call"]');
-                if (accBtn) accBtn.click();
-              } else {
-                const muteBtn = document.querySelector('[data-action="call-toggle-mute"]');
-                if (muteBtn) muteBtn.click();
-              }
-              return;
-            }
-          } else {
-            _airGesturePalmScore = Math.max(0, _airGesturePalmScore - 0.1);
-            _airGestureWaveScore = Math.max(0, _airGestureWaveScore - 0.1);
-            if (_airGesturePalmScore <= 0.05 && _airGestureWaveScore <= 0.05) {
-              updateHud(0, '#3F89F6', defLabel);
-            }
-          }
-        }, 110);
-      }
-
       function renderCallOverlay() {
         const root = document.getElementById('call-root');
-        if (!ui.activeCall || !state) { stopAirGestureEngine(); _lastCallRenderKey = ''; root.innerHTML = ''; return; }
+        if (!ui.activeCall || !state) { _lastCallRenderKey = ''; root.innerHTML = ''; return; }
         const call = ui.activeCall;
         const callKey = [
           call.roomId, call.status, call.type,
@@ -12539,7 +12380,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const lcamOff = document.getElementById('local-vc-off-badge');
           if (lcamOff) lcamOff.classList.toggle('hidden', !!call.camOn);
           attachCallStreams();
-          startAirGestureEngine();
           return;
         }
         _lastCallRenderKey = callKey;
@@ -12611,10 +12451,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <!-- Right-Edge Minimal Controls: ••• (Cam, Mic, Flip, Speaker) + Red X -->
               <div style="padding-bottom:max(1.75rem, env(safe-area-inset-bottom));" class="relative z-20 px-5 flex items-end justify-end">
                 <div class="relative flex flex-col items-end gap-3.5">
-                  <div id="air-gesture-hud" class="${(state && state.security && state.security.airGestureCalls !== false) ? 'inline-flex' : 'hidden'} items-center gap-2 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-xl border border-white/15 text-[11px] font-semibold text-white/90 shadow-lg">
-                    <svg class="w-4 h-4 -rotate-90 shrink-0" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2.5"/><circle id="air-gesture-ring" cx="12" cy="12" r="9" fill="none" stroke="#3F89F6" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55"/></svg>
-                    <span id="air-gesture-label">${call.status === 'incoming' ? 'Palm: Answer • Wave: Decline' : 'Palm: Mute • Wave: End'}</span>
-                  </div>
                   <div id="call-peer-state-badge" class="hidden px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11.5px] font-semibold text-white/90"></div>
                   <div id="call-controls-menu" class="flex flex-col items-center gap-3 mb-1 ${call.muteMenuOpen ? '' : 'hidden'}">
                     <button id="call-cam-btn" type="button" data-action="call-toggle-cam" title="${call.camOn ? 'Camera Off' : 'Camera On'}" aria-label="Toggle Camera" class="w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-90 transition ${call.camOn ? 'bg-white text-[#34C759]' : 'bg-black/45 backdrop-blur-xl border border-white/25 text-white'}">
@@ -12658,11 +12494,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
             <div class="relative z-10 flex flex-col items-center justify-center gap-3">
               ${renderAvatar(call.avatarText, call.avatarUrl, 'w-28 h-28 text-[36px]', 'bg-white/10 backdrop-blur-2xl border border-[#C6A76D]/40 text-white shadow-2xl')}
-              <div id="air-gesture-hud" class="${(state && state.security && state.security.airGestureCalls !== false) ? 'inline-flex' : 'hidden'} items-center gap-2 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-xl border border-white/15 text-[11px] font-semibold text-white/90 shadow-lg">
-                    <svg class="w-4 h-4 -rotate-90 shrink-0" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2.5"/><circle id="air-gesture-ring" cx="12" cy="12" r="9" fill="none" stroke="#3F89F6" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55"/></svg>
-                    <span id="air-gesture-label">${call.status === 'incoming' ? 'Palm: Answer • Wave: Decline' : 'Palm: Mute • Wave: End'}</span>
-                  </div>
-                  <div id="call-peer-state-badge" class="hidden px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11.5px] font-semibold text-white/90"></div>
+              <div id="call-peer-state-badge" class="hidden px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11.5px] font-semibold text-white/90"></div>
             </div>
 
             ${call.status === 'incoming' ? `
@@ -12693,7 +12525,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           </div>
         `;
         attachCallStreams();
-        startAirGestureEngine();
       }
 
       function render() {
@@ -12865,9 +12696,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <div id="status-viewers-sheet-host">${ui.statusViewersOpen ? buildStatusViewersSheetHtml(viewerList) : ''}</div>
               `;
             })() : ''}
-            <div class="relative z-20 flex items-center justify-center gap-2.5">
+            ${!isMine ? `<div class="relative z-20 flex items-center justify-center gap-2.5">
               ${['❤️', '🔥', '😂'].map(em => `<button type="button" data-action="reply-status" data-id="${st.id}" data-emoji="${em}" class="w-10 h-10 rounded-full bg-black/40 text-[17px] flex items-center justify-center">${em}</button>`).join('')}
-            </div>
+            </div>` : ''}
           </div>
         `;
       }
@@ -13059,16 +12890,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         if (action === 'join-private-room') { enterPrivateRoom('join'); return; }
         if (action === 'leave-private-room') { leavePrivateRoom(); return; }
         if (action === 'copy-priv-code') { copyText(btn.dataset.text || '', 'Room code copied: ' + (btn.dataset.text || '')); return; }
-        if (action === 'fill-demo-seed') {
-          authState.loginWords = [...DEMO_SEED];
-          authState.authError = '';
-          render();
-          setTimeout(() => {
-            const btn = document.getElementById('login-submit-btn');
-            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }, 30);
-          return;
-        }
         if (action === 'regen-seed') { authState.generatedSeed = generateSeedPhrase(); render(); return; }
         if (action === 'copy-generated-seed') { copyText(authState.generatedSeed.join(' '), 'Seed phrase copied'); return; }
         if (action === 'download-seed') { downloadSeedFile(authState.generatedSeed, authState.displayName, ''); return; }
@@ -13418,13 +13239,6 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           scheduleUserPrefsSync(true);
           render();
           showToast(state.security.liveSketchEnabled ? 'Live Sketch enabled' : 'Live Sketch turned off');
-        } else if (action === 'toggle-air-gestures') {
-          ensureSecurityDefaults();
-          state.security.airGestureCalls = (state.security.airGestureCalls === false);
-          persistCurrentVault();
-          scheduleUserPrefsSync(true);
-          render();
-          showToast(state.security.airGestureCalls ? 'Air-Gesture Call Controls enabled' : 'Air-Gesture Call Controls turned off');
         } else if (action === 'toggle-hide-world-chat') {
           ensureSecurityDefaults();
           state.security.hideWorldChat = !state.security.hideWorldChat;
@@ -13879,8 +13693,13 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           renderModal();
           const inp = document.getElementById('message-input');
           if (inp) { inp.value += btn.dataset.emoji; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); }
+        } else if (action === 'toggle-sketch-menu') {
+          ui.sketchMenuOpen = !ui.sketchMenuOpen;
+          render();
         } else if (action === 'sketch-tool') {
           ui.sketchTool = btn.dataset.tool || 'pen';
+          if (ui.sketchTool === 'pen') ui.sketchColor = '#FFFFFF';
+          ui.sketchMenuOpen = false;
           render();
         } else if (action === 'sketch-color') {
           ui.sketchColor = btn.dataset.color || 'adaptive';
@@ -14286,9 +14105,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           persistCurrentVault();
           render();
         } else if (action === 'copy-vault-seed') {
-          copyText((state.userProfile.seedWords || DEMO_SEED).join(' '), 'Seed phrase copied');
+          copyText((state.userProfile.seedWords || []).join(' '), 'Seed phrase copied');
         } else if (action === 'download-vault-seed') {
-          downloadSeedFile(state.userProfile.seedWords || DEMO_SEED, state.userProfile.name, state.userProfile.friendCode);
+          downloadSeedFile(state.userProfile.seedWords || [], state.userProfile.name, state.userProfile.friendCode);
         } else if (action === 'crop-current-avatar') {
           if (state && state.userProfile && state.userProfile.avatarUrl) {
             openAvatarCropper(state.userProfile.avatarUrl);
