@@ -126,13 +126,15 @@
       position: relative;
       padding: 2px;
       border-radius: 9999px;
-      border: 3px solid #C6A76D;
+      border: 3px solid #3F89F6;
       background: transparent;
     }
     @keyframes typingOrbit {
-      0% { transform: rotate(0deg) scale(1); }
-      50% { transform: rotate(180deg) scale(1.03); }
-      100% { transform: rotate(360deg) scale(1); }
+      0% { transform: translateY(0px) rotate(0deg) scale(1); filter: drop-shadow(0 0 4px rgba(198, 167, 109, 0.45)); }
+      25% { transform: translateY(-2.5px) rotate(90deg) scale(1.07); filter: drop-shadow(0 0 9px rgba(198, 167, 109, 0.85)); }
+      50% { transform: translateY(0px) rotate(180deg) scale(1.02); filter: drop-shadow(0 0 5px rgba(198, 167, 109, 0.55)); }
+      75% { transform: translateY(1.5px) rotate(270deg) scale(1.08); filter: drop-shadow(0 0 10px rgba(198, 167, 109, 0.88)); }
+      100% { transform: translateY(0px) rotate(360deg) scale(1); filter: drop-shadow(0 0 4px rgba(198, 167, 109, 0.45)); }
     }
     .ring-second-layer {
       position: absolute;
@@ -144,7 +146,47 @@
       will-change: transform, opacity;
     }
     .ring-second-dotted {
-      animation: typingOrbit 5.8s linear infinite;
+      animation: typingOrbit 2.8s ease-in-out infinite;
+    }
+    [data-msg-side="me"] + [data-msg-side="other"],
+    [data-msg-side="other"] + [data-msg-side="me"] {
+      margin-top: 16px !important;
+    }
+    @keyframes holoShimmer {
+      0%, 100% { filter: drop-shadow(0 0 14px rgba(63,137,246,0.7)) drop-shadow(0 0 26px rgba(198,167,109,0.45)); }
+      50% { filter: drop-shadow(0 0 22px rgba(198,167,109,0.85)) drop-shadow(0 0 34px rgba(63,137,246,0.65)); }
+    }
+    @keyframes holoRingPulse {
+      0% { transform: scale(0.55); opacity: 0.9; }
+      100% { transform: scale(1.75); opacity: 0; }
+    }
+    .holo-orb-float {
+      position: fixed;
+      z-index: 90;
+      pointer-events: none;
+      will-change: transform, opacity;
+      transform-style: preserve-3d;
+    }
+    .holo-orb-inner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.45), rgba(63,137,246,0.22) 55%, rgba(198,167,109,0.24) 100%);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.45);
+      animation: holoShimmer 1.1s ease-in-out infinite;
+      transform: translate3d(var(--holo-tx, 0px), var(--holo-ty, 0px), 0) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg));
+      transition: transform 90ms linear;
+    }
+    .holo-spark-ring {
+      position: fixed;
+      z-index: 89;
+      pointer-events: none;
+      border-radius: 9999px;
+      border: 2px solid rgba(198, 167, 109, 0.85);
+      box-shadow: 0 0 16px rgba(63, 137, 246, 0.6);
+      animation: holoRingPulse 520ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
     @keyframes ringPingWave {
       0% { transform: scale(0.96); opacity: 0.9; }
@@ -163,7 +205,7 @@
     }
     /* Rhythm-Adaptive Glass Glow */
     #plus-ring-wrap.rhythm-fast-ring .online-plus-ring {
-      box-shadow: 0 0 0 2px rgba(198, 167, 109, 0.32), 0 0 18px rgba(198, 167, 109, 0.62);
+      box-shadow: 0 0 0 2px rgba(63, 137, 246, 0.34), 0 0 18px rgba(63, 137, 246, 0.65);
       transition: box-shadow 220ms ease;
     }
     #plus-ring-wrap.rhythm-fast-ring .ring-second-dotted {
@@ -171,6 +213,10 @@
     }
     #composer-pill {
       transition: border-color 320ms ease, box-shadow 320ms ease, background-color 480ms ease;
+    }
+    #message-input, #message-input:focus, #message-input:focus-visible {
+      outline: none !important;
+      box-shadow: none !important;
     }
     #composer-pill.rhythm-fast-glass {
       border-color: rgba(198, 167, 109, 0.68) !important;
@@ -1498,43 +1544,253 @@
         rhythmLastKeyAt = now;
       }
 
-      let walkieStream = null;
-      let walkieDemoTimer = null;
+      let _sketchStrokes = [];
+      let _sketchDrawing = false;
+      let _sketchCurStroke = null;
+      let _sketchLastPt = null;
 
-      function startWalkieTalkie(chatId) {
-        if (!state || !chatId) return;
-        ui.walkieActive = true;
-        ui.walkieChatId = chatId;
-        ui.walkieSpeaking = false;
-        ui.walkiePeerSpeaking = false;
-        triggerHaptic([12, 30, 16]);
-        playSubtleTone('walkie_on');
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-            if (!ui.walkieActive) { stream.getTracks().forEach(t => t.stop()); return; }
-            walkieStream = stream;
-          }).catch(() => {});
+      function getSketchColorHex(col) {
+        if (col === 'adaptive') {
+          return (state && state.darkMode !== false) ? '#FFFFFF' : '#09090C';
         }
-        broadcastWalkieState(chatId, true, false);
-        showToast('Walkie-Talkie ON • Hold to Talk');
+        return col || '#3F89F6';
+      }
+
+      function getSketchBottomOffset() {
+        const feedEl = document.getElementById('message-feed');
+        if (!feedEl) return 0;
+        return Math.max(0, feedEl.scrollHeight - feedEl.clientHeight - feedEl.scrollTop);
+      }
+
+      function drawSketchSegment(ctx, w, h, tool, color, size, p0, p1, bOff = 0) {
+        if (!ctx || !p0 || !p1) return;
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (tool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+          ctx.lineWidth = Math.max(14, Number(size || 5) * 3.2);
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = getSketchColorHex(color);
+          ctx.lineWidth = Number(size || 5);
+        }
+        ctx.beginPath();
+        ctx.moveTo(p0.x * w, p0.y * h + bOff);
+        ctx.lineTo(p1.x * w, p1.y * h + bOff);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function redrawSketchCanvas() {
+        const cvs = document.getElementById('live-sketch-canvas');
+        if (!cvs) return;
+        const rect = cvs.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && (cvs.width !== Math.round(rect.width) || cvs.height !== Math.round(rect.height))) {
+          cvs.width = Math.round(rect.width);
+          cvs.height = Math.round(rect.height);
+        }
+        const ctx = cvs.getContext('2d');
+        if (!ctx) return;
+        ctx.clearRect(0, 0, cvs.width, cvs.height);
+        const rid = state && state.selectedChatId;
+        const bOff = getSketchBottomOffset();
+        _sketchStrokes.filter(s => s && s.roomId === rid).forEach(s => {
+          const pts = s.points || [];
+          if (pts.length === 1) {
+            drawSketchSegment(ctx, cvs.width, cvs.height, s.tool, s.color, s.size, pts[0], pts[0], bOff);
+          } else {
+            for (let i = 1; i < pts.length; i++) {
+              drawSketchSegment(ctx, cvs.width, cvs.height, s.tool, s.color, s.size, pts[i - 1], pts[i], bOff);
+            }
+          }
+        });
+      }
+
+      function mountSketchCanvasOverlay() {
+        const activeChat = document.getElementById('active-chat-main');
+        const rid = state && state.selectedChatId;
+        const curChat = getSelectedChat();
+        const bothInChat = Boolean(curChat && curChat.isPeer && isPeerInChat(curChat));
+        const enabledInSet = !(state && state.security && state.security.liveSketchEnabled === false);
+        if (ui.sketchActive && (!bothInChat || !enabledInSet)) {
+          ui.sketchActive = false;
+          ui.sketchChatId = null;
+        }
+        const hasStrokesHere = Boolean(rid && bothInChat && enabledInSet && _sketchStrokes.some(s => s && s.roomId === rid));
+        let cvs = document.getElementById('live-sketch-canvas');
+        if (!activeChat || (!ui.sketchActive && !hasStrokesHere)) {
+          if (cvs) cvs.remove();
+          return;
+        }
+        if (!cvs) {
+          cvs = document.createElement('canvas');
+          cvs.id = 'live-sketch-canvas';
+          activeChat.appendChild(cvs);
+          cvs.addEventListener('pointerdown', (ev) => {
+            if (!ui.sketchActive) return;
+            ev.preventDefault();
+            const r = cvs.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            const bOff = getSketchBottomOffset();
+            const pt = { x: Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), y: (ev.clientY - r.top - bOff) / r.height };
+            _sketchDrawing = true;
+            _sketchLastPt = pt;
+            _sketchCurStroke = {
+              id: 'sk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+              ownerId: activeVaultId || 'me',
+              roomId: state.selectedChatId,
+              tool: ui.sketchTool || 'pen',
+              color: ui.sketchColor || 'adaptive',
+              size: Number(ui.sketchSize || 5),
+              points: [pt]
+            };
+            _sketchStrokes.push(_sketchCurStroke);
+            const ctx = cvs.getContext('2d');
+            if (ctx) drawSketchSegment(ctx, cvs.width, cvs.height, _sketchCurStroke.tool, _sketchCurStroke.color, _sketchCurStroke.size, pt, pt, bOff);
+            try { cvs.setPointerCapture(ev.pointerId); } catch (_) {}
+          });
+          cvs.addEventListener('pointermove', (ev) => {
+            if (!_sketchDrawing || !_sketchCurStroke || !_sketchLastPt) return;
+            const r = cvs.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            const bOff = getSketchBottomOffset();
+            const pt = { x: Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), y: (ev.clientY - r.top - bOff) / r.height };
+            _sketchCurStroke.points.push(pt);
+            const ctx = cvs.getContext('2d');
+            if (ctx) drawSketchSegment(ctx, cvs.width, cvs.height, _sketchCurStroke.tool, _sketchCurStroke.color, _sketchCurStroke.size, _sketchLastPt, pt, bOff);
+            if (_sketchCurStroke.roomId) {
+              sendRoomBroadcast(_sketchCurStroke.roomId, 'sketch_fast', {
+                evt: 'seg',
+                roomId: _sketchCurStroke.roomId,
+                fromId: activeVaultId,
+                strokeId: _sketchCurStroke.id,
+                tool: _sketchCurStroke.tool,
+                color: _sketchCurStroke.color,
+                size: _sketchCurStroke.size,
+                x0: _sketchLastPt.x, y0: _sketchLastPt.y,
+                x1: pt.x, y1: pt.y
+              });
+            }
+            _sketchLastPt = pt;
+          });
+          const endStroke = () => {
+            if (!_sketchDrawing) return;
+            _sketchDrawing = false;
+            if (_sketchCurStroke && _sketchCurStroke.roomId) {
+              sendRoomBroadcast(_sketchCurStroke.roomId, 'sketch_fast', {
+                evt: 'stroke_end',
+                roomId: _sketchCurStroke.roomId,
+                fromId: activeVaultId,
+                stroke: _sketchCurStroke
+              });
+            }
+            _sketchCurStroke = null;
+            _sketchLastPt = null;
+          };
+          cvs.addEventListener('pointerup', endStroke);
+          cvs.addEventListener('pointercancel', endStroke);
+        }
+        const feedEl = document.getElementById('message-feed');
+        if (feedEl && !feedEl._sketchScrollBound) {
+          feedEl._sketchScrollBound = true;
+          let _skRaf = false;
+          feedEl.addEventListener('scroll', () => {
+            if (_skRaf) return;
+            _skRaf = true;
+            requestAnimationFrame(() => { _skRaf = false; redrawSketchCanvas(); });
+          }, { passive: true });
+        }
+        cvs.style.touchAction = ui.sketchActive ? 'none' : 'auto';
+        cvs.className = `absolute inset-0 w-full h-full z-[15] ${ui.sketchActive ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`;
+        redrawSketchCanvas();
+      }
+
+      function handleSketchSignal(sig) {
+        if (!sig || !sig.roomId || !activeVaultId || sig.fromId === activeVaultId) return;
+        if (state && state.security && state.security.liveSketchEnabled === false) return;
+        if (!state || state.activeNav !== 'messages' || state.selectedChatId !== sig.roomId) return;
+        if (sig.evt === 'clear') {
+          _sketchStrokes = _sketchStrokes.filter(s => s && s.roomId !== sig.roomId);
+          mountSketchCanvasOverlay();
+          return;
+        }
+        if (sig.evt === 'undo' && sig.strokeId) {
+          _sketchStrokes = _sketchStrokes.filter(s => !(s && s.id === sig.strokeId));
+          mountSketchCanvasOverlay();
+          return;
+        }
+        if (sig.evt === 'seg' && sig.strokeId) {
+          let st = _sketchStrokes.find(s => s && s.id === sig.strokeId);
+          if (!st) {
+            st = { id: sig.strokeId, ownerId: sig.fromId, roomId: sig.roomId, tool: sig.tool || 'pen', color: sig.color || 'adaptive', size: Number(sig.size || 5), points: [{ x: sig.x0, y: sig.y0 }] };
+            _sketchStrokes.push(st);
+          }
+          st.points.push({ x: sig.x1, y: sig.y1 });
+          if (state && state.selectedChatId === sig.roomId) {
+            mountSketchCanvasOverlay();
+          }
+          return;
+        }
+        if (sig.evt === 'stroke_end' && sig.stroke && sig.stroke.id) {
+          const idx = _sketchStrokes.findIndex(s => s && s.id === sig.stroke.id);
+          if (idx >= 0) _sketchStrokes[idx] = sig.stroke;
+          else _sketchStrokes.push(sig.stroke);
+          if (state && state.selectedChatId === sig.roomId) {
+            mountSketchCanvasOverlay();
+          }
+        }
+      }
+
+      function startLiveSketch(chatId) {
+        if (ui.recordingVoice || ui.pendingVoiceDraft) return;
+        if (state && state.security && state.security.liveSketchEnabled === false) {
+          showToast('Live Sketch is turned off in Settings');
+          return;
+        }
+        const chat = getMergedChats().find(c => c.id === chatId);
+        if (!chat || !chat.isPeer || !isPeerInChat(chat)) {
+          showToast('Both of you must be in this chat box for Live Sketch');
+          return;
+        }
+        ui.sketchActive = true;
+        ui.sketchChatId = chatId;
+        ui.sketchTool = ui.sketchTool || 'pen';
+        ui.sketchColor = ui.sketchColor || 'adaptive';
+        ui.sketchSize = ui.sketchSize || 5;
+        triggerHaptic(12);
+        showToast('Live Sketch ON • Draw over chat');
         render();
       }
 
-      function stopWalkieTalkie() {
-        clearTimeout(walkieDemoTimer);
-        if (walkieStream) {
-          try { walkieStream.getTracks().forEach(t => t.stop()); } catch (e) {}
-          walkieStream = null;
-        }
-        const prevWalkieRoom = ui.walkieChatId;
-        ui.walkieActive = false;
-        ui.walkieSpeaking = false;
-        ui.walkiePeerSpeaking = false;
-        ui.walkieChatId = null;
-        if (prevWalkieRoom) broadcastWalkieState(prevWalkieRoom, false, false);
-        triggerHaptic(10);
-        playSubtleTone('walkie_off');
+      function stopLiveSketch() {
+        ui.sketchActive = false;
+        ui.sketchChatId = null;
+        triggerHaptic(8);
         render();
+      }
+
+      function undoLiveSketch() {
+        const rid = state && state.selectedChatId;
+        const myId = activeVaultId || 'me';
+        const idx = [..._sketchStrokes].reverse().findIndex(s => s && s.roomId === rid && s.ownerId === myId);
+        if (idx === -1) return;
+        const realIdx = _sketchStrokes.length - 1 - idx;
+        const removed = _sketchStrokes.splice(realIdx, 1)[0];
+        if (removed && rid) {
+          sendRoomBroadcast(rid, 'sketch_fast', { evt: 'undo', roomId: rid, fromId: activeVaultId, strokeId: removed.id });
+        }
+        redrawSketchCanvas();
+      }
+
+      function clearLiveSketch() {
+        const rid = state && state.selectedChatId;
+        _sketchStrokes = _sketchStrokes.filter(s => s && s.roomId !== rid);
+        if (rid) {
+          sendRoomBroadcast(rid, 'sketch_fast', { evt: 'clear', roomId: rid, fromId: activeVaultId });
+        }
+        mountSketchCanvasOverlay();
       }
 
       function triggerRingPing(chatId, senderName, isIncoming) {
@@ -1730,7 +1986,37 @@
           }
         });
       }
-      document.addEventListener('visibilitychange', () => { if (activeVaultId && state) { syncOwnPresence(document.hidden); if (!document.hidden && getSupaCfg()) flushOutbox().then(() => syncWithSupabase()); } });
+      async function checkPendingUpiSettlement() {
+        if (!ui || !ui.pendingUpiPay || ui.modal !== 'upiLaunch' || !getSupaCfg()) return;
+        const p = ui.pendingUpiPay;
+        try {
+          const rows = await supaFetch('shavlo_upi_txns', 'GET', `?select=id,status,utr&id=eq.${encodeURIComponent(p.txnId)}`);
+          const row = Array.isArray(rows) && rows[0];
+          if (row && row.status === 'settled') {
+            finalizePendingUpiPay(row.utr || '', true);
+            return;
+          }
+          if (row && row.status === 'declined') {
+            ui.pendingUpiPay = null;
+            ui.upiReturnedFromApp = false;
+            ui.modal = null;
+            renderModal();
+            showToast('UPI payment was declined');
+            return;
+          }
+        } catch (_) {}
+        ui.upiReturnedFromApp = true;
+        renderModal();
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (activeVaultId && state) {
+          syncOwnPresence(document.hidden);
+          if (!document.hidden) {
+            if (ui && ui.modal === 'upiLaunch' && ui.pendingUpiPay) checkPendingUpiSettlement();
+            if (getSupaCfg()) flushOutbox().then(() => syncWithSupabase());
+          }
+        }
+      });
 
       const lastRingStateByChat = {};
       function triggerRingHaptic(chatId, nextState) {
@@ -1983,6 +2269,7 @@
       }
 
       function safeBackgroundRender() {
+        if (ui && ui.recordingVoice) return;
         if (ui && (ui.vaultLocked || ui.modal === 'secretPin' || ui.modal === 'forgotPinPhrase' || ui.modal === 'shavloVault')) return;
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
@@ -2121,7 +2408,7 @@
         const stream = walkieRecStream;
         walkieRecorder = null;
         walkieRecStream = null;
-        const cleanup = () => { if (stream && !ui.walkieActive) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} } };
+        const cleanup = () => { if (stream && !ui.sketchActive) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} } };
         if (!rec || rec.state === 'inactive') { cleanup(); return; }
         rec.onstop = () => {
           cleanup();
@@ -2993,6 +3280,8 @@
             hiddenChatIds: state.security.hiddenChatIds || {},
             secretChatIds: state.security.secretChatIds || {},
             hideWorldChat: Boolean(state.security.hideWorldChat),
+            airGestureCalls: state.security.airGestureCalls !== false,
+            liveSketchEnabled: state.security.liveSketchEnabled !== false,
             permissionsPrompted: Boolean(state.security.permissionsPrompted),
             permissionsState: state.security.permissionsState || {},
             notifPrefs: state.security.notifPrefs || { videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true },
@@ -3131,6 +3420,13 @@
               if (!frMap.has(f.id)) frMap.set(f.id, { id: f.id, users: [f.user_a, f.user_b], since: f.since || '' });
             });
             net.friendships = Array.from(frMap.values());
+            if (state && state.selectedChatId && state.selectedChatId.startsWith('peer_')) {
+              const stillFriend = net.friendships.some(f => f && Array.isArray(f.users) && f.users.includes(activeVaultId) && makeRoomId(activeVaultId, f.users.find(u => u && u !== activeVaultId) || '') === state.selectedChatId);
+              if (!stillFriend) {
+                state.selectedChatId = null;
+                state.mobileView = 'list';
+              }
+            }
           }
           net.groups = (groups || []).filter(g => !g.expires_at || Number(g.expires_at) > Date.now()).map(g => ({
             id: g.id, code: g.code, name: g.name, desc: g.description || '',
@@ -3163,7 +3459,17 @@
               const dmReq = dmRoomIds.size > 0
                 ? supaFetch('shavlo_messages', 'GET', `?select=id,room_id,author_id,author_name,payload,created_at,expires_at&room_id=in.(${encodeURIComponent(Array.from(dmRoomIds).slice(0, 60).map(r => `"${String(r).replace(/"/g, '')}"`).join(','))})&order=created_at.desc&limit=500`).catch(() => [])
                 : supaFetch('shavlo_messages', 'GET', `?select=id,room_id,author_id,author_name,payload,created_at,expires_at&room_id=ilike.*${vidEnc}*&order=created_at.desc&limit=500`).catch(() => []);
-              const dmMsgs = await dmReq;
+              const unfrReq = supaFetch('shavlo_messages', 'GET', `?select=id,room_id,author_id,author_name,payload,created_at,expires_at&room_id=eq.${encodeURIComponent('sys_unfriend_' + activeVaultId)}&order=created_at.desc&limit=25`).catch(() => []);
+              const [dmMsgs, unfrMsgs] = await Promise.all([dmReq, unfrReq]);
+              if (Array.isArray(unfrMsgs) && unfrMsgs.length > 0) {
+                const seenU = new Set(allMsgRows.map(m => m.id));
+                unfrMsgs.reverse().forEach(rm => {
+                  if (rm && rm.id && !seenU.has(rm.id)) {
+                    seenU.add(rm.id);
+                    allMsgRows.push(rm);
+                  }
+                });
+              }
               if (Array.isArray(dmMsgs) && dmMsgs.length > 0) {
                 const seenIds = new Set(allMsgRows.map(m => m.id));
                 dmMsgs.reverse().forEach(rm => {
@@ -3179,12 +3485,28 @@
           const nowMs = Date.now();
           for (const row of allMsgRows) {
             if (!row || row.room_id === 'world_global_chat') continue;
+            if (row.room_id && String(row.room_id).startsWith('sys_unfriend_')) {
+              if (row.room_id === ('sys_unfriend_' + activeVaultId) && !row.deleted_at && (!row.expires_at || Number(row.expires_at) >= nowMs)) {
+                try {
+                  const uPl = (typeof row.payload === 'string') ? JSON.parse(row.payload) : (row.payload || {});
+                  handleIncomingUnfriendNotice(Object.assign({}, uPl, {
+                    id: row.id,
+                    fromId: uPl.fromId || row.author_id,
+                    fromName: uPl.fromName || row.author_name || 'User',
+                    removedAt: Number(row.created_at || uPl.removedAt || Date.now())
+                  }), forceFull && supaSyncTickCount === 1);
+                } catch (_) {}
+              }
+              continue;
+            }
             if (row.expires_at && Number(row.expires_at) < nowMs) continue;
-            if (row.deleted_at) continue;
             const decPl = await decryptMsgPayload(row.room_id, row.payload);
+            const isDeletedRow = Boolean(row.deleted_at || (decPl && decPl.deleted));
             groupedMsgs[row.room_id] = groupedMsgs[row.room_id] || [];
             groupedMsgs[row.room_id].push(Object.assign({}, decPl, {
               id: row.id, authorId: row.author_id, authorName: row.author_name || '',
+              deleted: isDeletedRow,
+              deletedAt: row.deleted_at || (decPl && decPl.deletedAt) || null,
               expiresAt: row.expires_at || (decPl && decPl.expiresAt) || null
             }));
           }
@@ -3350,6 +3672,8 @@
               }
               if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
               if (typeof pr.hideWorldChat === 'boolean') { state.security.hideWorldChat = pr.hideWorldChat; if (pr.hideWorldChat) ui.worldChatOpen = false; }
+              if (typeof pr.airGestureCalls === 'boolean') state.security.airGestureCalls = pr.airGestureCalls;
+              if (typeof pr.liveSketchEnabled === 'boolean') { state.security.liveSketchEnabled = pr.liveSketchEnabled; if (!pr.liveSketchEnabled && ui.sketchActive) ui.sketchActive = false; }
               if (typeof pr.permissionsPrompted === 'boolean') state.security.permissionsPrompted = pr.permissionsPrompted;
               if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
               state.prefsUpdatedAt = Number(prefsRows[0].updated_at || Date.now());
@@ -3422,12 +3746,27 @@
                       }
                       return;
                     }
+                    if (String(row.room_id).startsWith('sys_unfriend_')) {
+                      if (row.room_id === ('sys_unfriend_' + activeVaultId) && change.eventType === 'INSERT') {
+                        const uPl = typeof row.payload === 'string' ? JSON.parse(row.payload) : (row.payload || {});
+                        if (handleIncomingUnfriendNotice(Object.assign({}, uPl, {
+                          id: row.id,
+                          fromId: uPl.fromId || row.author_id,
+                          fromName: uPl.fromName || row.author_name || 'User',
+                          removedAt: Number(row.created_at || uPl.removedAt || Date.now())
+                        }), false)) {
+                          syncFromNetwork();
+                          render();
+                        }
+                      }
+                      return;
+                    }
                     const net = getNetwork();
                     const list = Array.isArray(net.peerChats[row.room_id]) ? net.peerChats[row.room_id] : [];
                     if (change.eventType === 'INSERT' && row.author_id === activeVaultId && (Array.isArray(net.peerChats[row.room_id]) && net.peerChats[row.room_id].some(m => m.id === row.id))) return;
                     const rawPlRaw = (typeof row.payload === "string") ? JSON.parse(row.payload) : (row.payload || {});
                     const rawPl = await decryptMsgPayload(row.room_id, rawPlRaw);
-                    const mapped = Object.assign({}, rawPl, { id: row.id, authorId: row.author_id, authorName: row.author_name || "", createdAt: Number(row.created_at || rawPl.createdAt || Date.now()) });
+                    const mapped = Object.assign({}, rawPl, { id: row.id, authorId: row.author_id, authorName: row.author_name || "", deleted: Boolean(row.deleted_at || (rawPl && rawPl.deleted)), deletedAt: row.deleted_at || (rawPl && rawPl.deletedAt) || null, createdAt: Number(row.created_at || rawPl.createdAt || Date.now()) });
                     const idx = list.findIndex(m => m.id === row.id);
                     const wasAlreadyPresent = idx >= 0;
                     if (wasAlreadyPresent) list[idx] = Object.assign({}, list[idx], mapped);
@@ -3506,8 +3845,20 @@
                   net.friendships = net.friendships || [];
                   if (change && change.eventType === 'DELETE' && change.old && change.old.id) {
                     const before = net.friendships.length;
+                    const removedFr = net.friendships.find(f => f.id === change.old.id);
                     net.friendships = net.friendships.filter(f => f.id !== change.old.id);
-                    if (net.friendships.length !== before) { saveNetwork(net, 'realtime_fr_del'); syncFromNetwork(); }
+                    if (net.friendships.length !== before) {
+                      if (removedFr && Array.isArray(removedFr.users)) {
+                        const otherId = removedFr.users.find(u => u && u !== activeVaultId);
+                        if (otherId && state && state.selectedChatId === makeRoomId(activeVaultId, otherId)) {
+                          state.selectedChatId = null;
+                          state.mobileView = 'list';
+                        }
+                      }
+                      saveNetwork(net, 'realtime_fr_del');
+                      syncFromNetwork();
+                      render();
+                    }
                     return;
                   }
                   if (change && change.new && change.new.id) {
@@ -3578,6 +3929,8 @@
                       }
                       if (pr.notifPrefs) state.security.notifPrefs = Object.assign({ videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true }, pr.notifPrefs);
                       if (typeof pr.hideWorldChat === 'boolean') { state.security.hideWorldChat = pr.hideWorldChat; if (pr.hideWorldChat) ui.worldChatOpen = false; }
+              if (typeof pr.airGestureCalls === 'boolean') state.security.airGestureCalls = pr.airGestureCalls;
+              if (typeof pr.liveSketchEnabled === 'boolean') { state.security.liveSketchEnabled = pr.liveSketchEnabled; if (!pr.liveSketchEnabled && ui.sketchActive) ui.sketchActive = false; }
                       if (typeof pr.permissionsPrompted === 'boolean') state.security.permissionsPrompted = pr.permissionsPrompted;
                       if (pr.permissionsState) state.security.permissionsState = Object.assign({}, state.security.permissionsState || {}, pr.permissionsState);
                       state.prefsUpdatedAt = Number(change.new.updated_at || Date.now());
@@ -3667,7 +4020,25 @@
                 } catch (_) {}
                 scheduleSupaSync(300);
               })
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_txns' }, () => scheduleSupaSync(300))
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_txns' }, (change) => {
+                try {
+                  const row = change && change.new;
+                  if (row && row.id && ui && ui.pendingUpiPay && ui.pendingUpiPay.txnId === row.id) {
+                    if (row.status === 'settled') {
+                      finalizePendingUpiPay(row.utr || '', true);
+                      return;
+                    } else if (row.status === 'declined') {
+                      ui.pendingUpiPay = null;
+                      ui.upiReturnedFromApp = false;
+                      ui.modal = null;
+                      renderModal();
+                      showToast('UPI payment was declined');
+                      return;
+                    }
+                  }
+                } catch (_) {}
+                scheduleSupaSync(300);
+              })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_upi_contacts' }, () => scheduleSupaSync(300))
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_open_rooms' }, (change) => {
                 try {
@@ -3715,6 +4086,8 @@
               })
               .on('postgres_changes', { event: '*', schema: 'public', table: 'shavlo_game_scores' }, (change) => {
                 if (change && change.new && change.new.game) {
+                  const pIds = getGameChatPlayerIds();
+                  if (!change.new.vault_id || !pIds.includes(change.new.vault_id)) return;
                   ui.topGameScores = ui.topGameScores || [];
                   ui.topGameScores.unshift(change.new);
                   ui.topGameScores.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
@@ -4052,6 +4425,55 @@
                   syncFromNetwork();
                 } catch (_) {}
               })
+              .on('broadcast', { event: 'watch_together_fast' }, ({ payload }) => {
+                try { handleWatchTogetherSignal(payload); } catch (_) {}
+              })
+              .on('broadcast', { event: 'screen_peek_sig' }, ({ payload }) => {
+                try { handleScreenPeekSignal(payload); } catch (_) {}
+              })
+              .on('broadcast', { event: 'holo_react_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.roomId || !payload.msgId || !payload.emoji) return;
+                  if (payload.fromId && payload.fromId === activeVaultId) return;
+                  const isInRoom = state && state.activeNav === 'messages' && state.selectedChatId === payload.roomId;
+                  if (isInRoom) {
+                    launchHoloReaction(payload.emoji, payload.msgId, false);
+                  } else if (payload.fromName) {
+                    showToast(`${payload.fromName} reacted ${payload.emoji}`);
+                  }
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'msg_update_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !payload.roomId || !payload.msgId || !payload.msg) return;
+                  const net = getNetwork();
+                  const list = Array.isArray(net.peerChats[payload.roomId]) ? net.peerChats[payload.roomId] : [];
+                  const idx = list.findIndex(m => m.id === payload.msgId);
+                  if (idx >= 0) {
+                    list[idx] = Object.assign({}, list[idx], payload.msg, { id: payload.msgId });
+                    net.peerChats[payload.roomId] = list;
+                    saveNetwork(net, 'msg_update_fast');
+                    const curChat = getSelectedChat();
+                    const existingBubble = document.querySelector(`[data-msg-bubble="${payload.msgId}"]`);
+                    if (existingBubble && curChat && curChat.id === payload.roomId) {
+                      const m = list[idx];
+                      const normalized = Object.assign({}, m, { sender: m.authorId === activeVaultId ? 'me' : 'other', senderName: m.authorId === activeVaultId ? 'You' : curChat.name });
+                      existingBubble.outerHTML = renderBubble(curChat, normalized);
+                    } else {
+                      syncFromNetwork();
+                    }
+                  }
+                } catch (_) {}
+              })
+              .on('broadcast', { event: 'friend_remove_fast' }, ({ payload }) => {
+                try {
+                  if (!payload || !activeVaultId || payload.toId !== activeVaultId) return;
+                  if (handleIncomingUnfriendNotice(payload, false)) {
+                    syncFromNetwork();
+                    render();
+                  }
+                } catch (_) {}
+              })
               .on('broadcast', { event: 'world_msg_fast' }, ({ payload }) => {
                 try {
                   if (!payload || !payload.id) return;
@@ -4098,38 +4520,8 @@
                   }
                 } catch (_) {}
               })
-              .on('broadcast', { event: 'walkie_state' }, ({ payload }) => {
-                if (!payload || payload.fromId === activeVaultId || !payload.roomId) return;
-                if (payload.active) {
-                  ui.walkieActive = true;
-                  ui.walkieChatId = payload.roomId;
-                  ui.walkiePeerSpeaking = Boolean(payload.speaking);
-                } else if (ui.walkieChatId === payload.roomId) {
-                  ui.walkiePeerSpeaking = false;
-                }
-                safeBackgroundRender();
-              })
-              .on('broadcast', { event: 'walkie_audio' }, ({ payload }) => {
-                if (payload && payload.fromId !== activeVaultId && payload.audioData) {
-                  const _wnp = (state && state.security && state.security.notifPrefs) || {};
-                  if (_wnp.walkie !== false) {
-                    playSubtleTone('walkie_on');
-                    if (document.hidden || state.selectedChatId !== payload.roomId) {
-                      showSystemNotif('Walkie-Talkie', 'Incoming live voice transmission', 'shavlo-walkie-' + (payload.roomId || ''), payload.roomId);
-                    }
-                  }
-                  ui.walkieActive = true;
-                  ui.walkieChatId = payload.roomId;
-                  ui.walkiePeerSpeaking = true;
-                  safeBackgroundRender();
-                  try {
-                    const wa = new Audio(payload.audioData);
-                    wa.onended = () => { ui.walkiePeerSpeaking = false; safeBackgroundRender(); };
-                    wa.play().catch(() => {});
-                  } catch (_) {}
-                  clearTimeout(walkieDemoTimer);
-                  walkieDemoTimer = setTimeout(() => { ui.walkiePeerSpeaking = false; safeBackgroundRender(); }, 4500);
-                }
+              .on('broadcast', { event: 'sketch_fast' }, ({ payload }) => {
+                try { handleSketchSignal(payload); } catch (_) {}
               })
               .on('presence', { event: 'sync' }, () => {
                 try {
@@ -4341,6 +4733,10 @@
         statusStudio: null,
         youTab: 'account',
         editingMsgId: null,
+        activeMsgMenuId: null,
+        activeMsgMoreOpen: false,
+        voiceSpeed: 1,
+        voiceTrimSilence: true,
         editingReqId: null,
         friendsModalTab: 'add',
         forwardMsg: null,
@@ -4354,10 +4750,11 @@
         ringPingChats: {},
         pendingBlockTarget: null,
         typingRhythm: 'neutral',
-        walkieActive: false,
-        walkieSpeaking: false,
-        walkiePeerSpeaking: false,
-        walkieChatId: null,
+        sketchActive: false,
+        sketchChatId: null,
+        sketchTool: 'pen',
+        sketchColor: 'adaptive',
+        sketchSize: 5,
         pendingVoiceDraft: null,
         recordingPaused: false,
         mistNext: false,
@@ -4539,6 +4936,7 @@
           (net.friendships || []).length,
           (net.groups || []).length,
           (net.statuses || []).length,
+          (state.unfriendNotices || []).length,
           (state.userProfile && state.userProfile.avatarUrl) || '',
           ui.activeCall ? (ui.activeCall.roomId + ':' + ui.activeCall.status) : ''
         ].join('#');
@@ -4843,6 +5241,8 @@
         if (!state.security.secretChatIds) state.security.secretChatIds = {};
         if (!state.security.hiddenChatIds) state.security.hiddenChatIds = {};
         if (!state.security.pinnedIds) state.security.pinnedIds = {};
+        if (!state.security.dismissedUnfriendIds) state.security.dismissedUnfriendIds = {};
+        if (!Array.isArray(state.unfriendNotices)) state.unfriendNotices = [];
         if (!state.security.notifPrefs) {
           state.security.notifPrefs = { videoCall: true, voiceCall: true, messages: true, walkie: true, audio: true, media: true };
         }
@@ -4854,6 +5254,63 @@
             { id: 'st_priya', authorId: 'sample_priya', chatId: 'c_priya', authorName: 'Priya', avatarText: 'P', text: 'Filter coffee + rainy Bengaluru afternoon ☕', bg: 'from-[#18181B] to-[#3F3F46]', photoUrl: '', createdAt: Date.now() - 5 * 3600 * 1000, expiresAt: Date.now() + 19 * 3600 * 1000, seen: false }
           ];
         }
+      }
+
+      function handleIncomingUnfriendNotice(notice, silent = false) {
+        if (!notice || !activeVaultId || !state) return false;
+        const fromId = notice.fromId || notice.authorId || '';
+        const toId = notice.toId || activeVaultId;
+        if (!fromId || fromId === activeVaultId || toId !== activeVaultId) return false;
+        ensureSecurityDefaults();
+        const nid = notice.id || ('unfr_' + fromId + '_' + (notice.removedAt || 0));
+        if (state.security && state.security.dismissedUnfriendIds && state.security.dismissedUnfriendIds[nid]) return false;
+
+        const net = getNetwork();
+        const beforeFr = (net.friendships || []).length;
+        net.friendships = (net.friendships || []).filter(f => !(f.users && f.users.includes(activeVaultId) && f.users.includes(fromId)));
+        const unfrChanged = net.friendships.length !== beforeFr;
+        if (unfrChanged) saveNetwork(net, 'friend_removed_rt');
+
+        const roomId = notice.roomId || makeRoomId(activeVaultId, fromId);
+        let chatClosed = false;
+        if (state.selectedChatId === roomId) {
+          state.selectedChatId = null;
+          state.mobileView = 'list';
+          chatClosed = true;
+        }
+
+        const fromName = String(notice.fromName || (net.directory && net.directory[fromId] && net.directory[fromId].name) || 'User').trim() || 'User';
+        const entry = {
+          id: nid,
+          fromId,
+          fromName,
+          roomId,
+          time: notice.time || nowTime(),
+          removedAt: Number(notice.removedAt || notice.createdAt || Date.now())
+        };
+        const existingIdx = state.unfriendNotices.findIndex(n => n.id === nid || n.fromId === fromId);
+        let bannerAdded = false;
+        if (existingIdx >= 0) {
+          const prev = state.unfriendNotices[existingIdx];
+          if (Number(prev.removedAt || 0) < entry.removedAt || prev.id !== entry.id) {
+            state.unfriendNotices[existingIdx] = entry;
+            bannerAdded = true;
+          }
+        } else {
+          state.unfriendNotices.unshift(entry);
+          if (state.unfriendNotices.length > 10) state.unfriendNotices = state.unfriendNotices.slice(0, 10);
+          bannerAdded = true;
+        }
+
+        if (unfrChanged || chatClosed || bannerAdded) {
+          persistCurrentVault();
+          if (!silent && bannerAdded) {
+            showToast(`${fromName} removed you`);
+            triggerHaptic(12);
+          }
+          return true;
+        }
+        return false;
       }
 
       function isChatBlocked(chatId) {
@@ -5180,8 +5637,10 @@
       }
 
       function syncTheme() {
-        if (state) state.darkMode = true;
-        document.documentElement.classList.add('dark');
+        const isDark = state ? (state.darkMode !== false) : true;
+        document.documentElement.classList.toggle('dark', isDark);
+        const tc = document.querySelector('meta[name="theme-color"]');
+        if (tc) tc.setAttribute('content', isDark ? '#09090C' : '#FAFAFC');
       }
 
       function icon(name, cls = 'w-5 h-5') {
@@ -6580,15 +7039,16 @@
         const txnId = 'UPI' + String(Date.now()).slice(-10);
         const noteText = (note || 'UPI Payment').trim();
         const upiUri = buildUpiPayUri(receiverUpi, receiverName, num, noteText, txnId);
-        if (chat && chat.isPeer && activeVaultId) {
+        if (activeVaultId) {
           supaWriteReliable('shavlo_upi_txns', 'POST', '?on_conflict=id', {
             id: txnId,
-            room_id: chat.id,
+            room_id: chat ? chat.id : ('ext:' + receiverUpi),
             sender_id: activeVaultId,
-            receiver_id: chat.peerVaultId || '',
+            receiver_id: chat ? (chat.peerVaultId || receiverUpi) : receiverUpi,
             amount: num,
             note: noteText,
             status: 'pending',
+            tx_type: chat ? 'pay' : 'external_pay',
             created_at: Date.now()
           });
         }
@@ -6613,12 +7073,13 @@
         return true;
       }
 
-      function finalizePendingUpiPay(utrRef) {
+      function finalizePendingUpiPay(utrRef, pspVerified = false) {
         const p = ui.pendingUpiPay;
         if (!p) return;
+        ui.upiReturnedFromApp = false;
         const chat = p.chatId ? getMergedChats().find(c => c.id === p.chatId) : null;
         const cleanUtr = String(utrRef || '').trim();
-        const finalNote = cleanUtr ? `${p.note} • UTR ${cleanUtr}` : p.note;
+        const finalNote = cleanUtr ? `${p.note} • UTR ${cleanUtr}` : (pspVerified ? `${p.note} • Verified` : p.note);
         const receiptSig = 'SIG-' + syncHash(`${p.txnId}:${p.amount}:${p.receiverUpi}:${activeVaultId}`).slice(0, 10);
         const msgTime = nowTime();
         const msg = {
@@ -6648,24 +7109,27 @@
           if (idxC >= 0) state.upiContacts[idxC] = entryC; else state.upiContacts.unshift(entryC);
           supaWriteReliable('shavlo_upi_contacts', 'POST', '?on_conflict=owner_id,vpa', { owner_id: activeVaultId, vpa: p.receiverUpi, label: entryC.label, last_paid_at: entryC.lastPaidAt });
         }
-        if (chat && chat.isPeer && activeVaultId) {
+        if (activeVaultId) {
           const nowTs = Date.now();
           const settledRow = {
             id: p.txnId,
-            room_id: chat.id,
+            room_id: chat ? chat.id : ('ext:' + p.receiverUpi),
             sender_id: activeVaultId,
-            receiver_id: chat.peerVaultId || p.peerVaultId || '',
+            receiver_id: chat ? (chat.peerVaultId || p.peerVaultId || p.receiverUpi) : p.receiverUpi,
             amount: p.amount,
             note: finalNote,
             status: 'settled',
-            tx_type: 'pay',
+            tx_type: chat ? 'pay' : 'external_pay',
             utr: cleanUtr,
             receipt_sig: receiptSig,
+            confirmed_at: nowTs,
             created_at: nowTs
           };
           supaWriteReliable('shavlo_upi_txns', 'POST', '?on_conflict=id', settledRow);
-          supaWriteReliable('shavlo_upi_events', 'POST', '', { id: 'evt_' + p.txnId + '_' + nowTs, txn_id: p.txnId, actor_id: activeVaultId, event_type: 'settled', meta: { utr: cleanUtr }, created_at: nowTs });
-          sendRoomBroadcast(chat.id, 'upi_fast', Object.assign({}, settledRow, { senderName: (state.userProfile && state.userProfile.name) || 'Friend', upiId: p.receiverUpi }));
+          supaWriteReliable('shavlo_upi_events', 'POST', '?on_conflict=id', { id: 'evt_' + p.txnId + '_' + nowTs, txn_id: p.txnId, actor_id: activeVaultId, event_type: pspVerified ? 'psp_settled' : 'settled', meta: { utr: cleanUtr, vpa: p.receiverUpi }, created_at: nowTs });
+          if (chat && chat.isPeer) {
+            sendRoomBroadcast(chat.id, 'upi_fast', Object.assign({}, settledRow, { senderName: (state.userProfile && state.userProfile.name) || 'Friend', upiId: p.receiverUpi }));
+          }
         }
         state.upiHistory = state.upiHistory || [];
         state.upiHistory.unshift({
@@ -7853,6 +8317,26 @@
               </div>
 
               <div id="chats-scroll" data-scroll-host="chats-scroll" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-3.5 sm:px-4 pt-1 pb-32 md:pb-6 space-y-1.5">
+                ${(Array.isArray(state.unfriendNotices) && state.unfriendNotices.length > 0) ? `
+                  <div class="space-y-2 pb-2">
+                    ${state.unfriendNotices.map(n => `
+                      <div class="rounded-2xl px-3.5 py-2.5 bg-rose-50 dark:bg-rose-950/35 border border-rose-200 dark:border-rose-500/30 flex items-center justify-between gap-3 shadow-sm">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <span class="w-8 h-8 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                            ${icon('shield', 'w-4 h-4')}
+                          </span>
+                          <div class="min-w-0">
+                            <p class="text-[13px] font-bold text-rose-700 dark:text-rose-300 truncate">${escapeHtml(n.fromName || 'User')} removed you</p>
+                            <p class="text-[11.5px] text-rose-600/80 dark:text-rose-300/75 truncate">Unfriended automatically • ${escapeHtml(n.time || 'Now')}</p>
+                          </div>
+                        </div>
+                        <button type="button" data-action="dismiss-unfriend-notice" data-id="${escapeHtml(n.id)}" title="Dismiss" class="w-7 h-7 rounded-full flex items-center justify-center text-rose-600/80 dark:text-rose-300/80 hover:bg-rose-500/15 transition shrink-0">
+                          ${icon('close', 'w-3.5 h-3.5')}
+                        </button>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : ''}
                 ${filtered.map((c, idx) => {
                   const isSel = c.id === state.selectedChatId;
                   const isSwiped = ui.swipedChatId === c.id;
@@ -7920,43 +8404,43 @@
         const activeMessages = isPrivateMode ? (ui.privateMessages[chat.id] || []) : chat.messages;
 
         return `
-          <main id="active-chat-main" class="${mobileCls} absolute inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-white dark:bg-[#0B0B0D]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
-            <!-- Minimalist Clean White & Black Upper Shelf -->
-            <header id="active-chat-header" data-chat-id="${escapeHtml(chat.id)}" style="padding-top:max(1rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-3.5 flex items-center justify-between gap-3 bg-[#09090C] text-white">
-              <div class="flex items-center gap-3 min-w-0">
-                <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition bg-white/[0.12] text-white hover:bg-white/[0.22] border border-white/[0.18]">
+          <main id="active-chat-main" class="${mobileCls} absolute inset-0 md:relative md:inset-auto flex-1 flex flex-col h-full min-h-0 min-w-0 ${isPrivateMode ? 'private-chat-box' : 'bg-[#FAFAFC] dark:bg-[#09090C]'} ${ui.typingRhythm === 'calm' ? 'rhythm-calm-chat' : ''} overflow-hidden transition-colors duration-500">
+            <!-- Compact Clean White & Black Upper Shelf -->
+            <header id="active-chat-header" data-chat-id="${escapeHtml(chat.id)}" style="padding-top:max(0.6rem, env(safe-area-inset-top)); transform:translateZ(0);" class="shrink-0 relative z-20 px-4 sm:px-6 pb-2.5 flex items-center justify-between gap-2.5 bg-[#FAFAFC] dark:bg-[#09090C] text-ink dark:text-white">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <button data-action="mobile-back" title="Back" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition bg-transparent backdrop-blur-sm text-ink dark:text-white hover:bg-black/[0.06] dark:hover:bg-white/[0.1] border border-black/[0.12] dark:border-white/[0.22]">
                   ${icon('back', 'w-5 h-5')}
                 </button>
-                <button data-action="open-modal" data-modal="contactMenu" title="Contact info, search &amp; options" class="flex items-center gap-3 min-w-0 text-left rounded-full pr-2 py-0.5 hover:opacity-80 transition">
-                  <span id="active-chat-avatar" data-av-url="${escapeHtml(chat.avatarUrl || '')}" class="relative inline-flex shrink-0 ${isPrivateMode ? 'profile-dotted-ring' : ''}">${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-12 h-12 text-[17px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}</span>
+                <button data-action="open-modal" data-modal="contactMenu" title="Contact info, search &amp; options" class="flex items-center gap-2.5 min-w-0 text-left rounded-full pr-2 py-0.5 hover:opacity-80 transition">
+                  <span id="active-chat-avatar" data-av-url="${escapeHtml(chat.avatarUrl || '')}" class="relative inline-flex shrink-0 ${isPrivateMode ? 'profile-dotted-ring' : ''}">${renderAvatar(chat.avatarText, chat.avatarUrl, 'w-9 h-9 text-[14px] font-bold', isPrivateMode ? 'bg-white text-black' : 'bg-ink dark:bg-white text-white dark:text-ink')}</span>
                   <div class="min-w-0">
-                    <h2 id="active-chat-name" class="title-display text-[20px] font-bold text-white truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
+                    <h2 id="active-chat-name" class="title-display text-[17px] font-bold text-ink dark:text-white truncate leading-[1.15] tracking-[-0.02em]">${escapeHtml(chat.name)}</h2>
                     ${isPrivateMode
-                      ? '<p class="text-[10.5px] text-white/70 font-semibold tracking-wider uppercase leading-tight mt-0.5">Private Mode • Pull right edge to exit</p>'
+                      ? '<p class="text-[10px] text-white/70 font-semibold tracking-wider uppercase leading-tight mt-0.5">Private Mode • Pull right edge to exit</p>'
                       : ''}
                   </div>
                 </button>
               </div>
-              <!-- Minimalist White & Black Pill for Video & Audio Call -->
-              <div class="h-10 shrink-0 flex items-center gap-1 px-1.5 rounded-full bg-white/[0.12] border border-white/[0.18]">
-                <button data-action="start-call" data-type="video" title="Video Call" class="w-9 h-8 rounded-full flex items-center justify-center transition text-white hover:bg-white/15">
-                  ${icon('video', 'w-[19px] h-[19px]')}
+              <!-- Transparent Pill for Video & Audio Call -->
+              <div class="h-10 shrink-0 flex items-center gap-1 px-1.5 rounded-full bg-transparent backdrop-blur-sm border border-black/[0.12] dark:border-white/[0.22]">
+                <button data-action="start-call" data-type="video" title="Video Call" class="w-9 h-8 rounded-full flex items-center justify-center transition text-ink dark:text-white hover:bg-black/[0.06] dark:hover:bg-white/10">
+                  ${icon('video', 'w-[18px] h-[18px]')}
                 </button>
-                <button data-action="start-call" data-type="voice" title="Audio Call" class="w-9 h-8 rounded-full flex items-center justify-center transition text-white hover:bg-white/15">
+                <button data-action="start-call" data-type="voice" title="Audio Call" class="w-9 h-8 rounded-full flex items-center justify-center transition text-ink dark:text-white hover:bg-black/[0.06] dark:hover:bg-white/10">
                   ${icon('calls', 'w-[18px] h-[18px]')}
                 </button>
               </div>
             </header>
 
             ${ui.inChatSearchOpen ? `
-              <div data-smart-search="message-feed" class="smart-search-wrap shrink-0 px-4 sm:px-6 py-2 border-b border-white/[0.08] bg-[#111116]/95 flex items-center gap-2">
-                <input id="inchat-search-input" type="text" value="${escapeHtml(ui.inChatSearchQuery)}" placeholder="Search in this chat..." class="flex-1 bg-white/[0.08] border border-white/[0.14] text-white placeholder:text-white/45 text-[13.5px] px-3.5 py-1.5 rounded-full focus:outline-none focus:border-[#3F89F6] focus:ring-2 focus:ring-[#3F89F6]/25 transition" />
-                <button data-action="toggle-chat-search" class="p-1 text-muted hover:text-ink">${icon('close', 'w-4 h-4')}</button>
+              <div data-smart-search="message-feed" class="smart-search-wrap shrink-0 relative z-20 px-4 sm:px-6 py-2 border-b border-black/[0.08] dark:border-white/[0.08] bg-[#FAFAFC]/95 dark:bg-[#111116]/95 flex items-center gap-2">
+                <input id="inchat-search-input" type="text" value="${escapeHtml(ui.inChatSearchQuery)}" placeholder="Search in this chat..." class="flex-1 bg-black/[0.05] dark:bg-white/[0.08] border border-black/[0.1] dark:border-white/[0.14] text-ink dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/45 text-[13.5px] px-3.5 py-1.5 rounded-full focus:outline-none focus:border-[#3F89F6] focus:ring-2 focus:ring-[#3F89F6]/25 transition" />
+                <button data-action="toggle-chat-search" class="p-1 text-muted hover:text-ink dark:hover:text-white">${icon('close', 'w-4 h-4')}</button>
               </div>
             ` : ''}
 
             <!-- Messages Feed -->
-            <div id="message-feed" data-scroll-host="message-feed" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-4 sm:px-6 pt-4 pb-28 space-y-2 ${ui.shoulderVeil ? 'shoulder-veil-on' : ''} ${isPrivateMode ? 'private-chat-box' : (state.wallpaper === 'custom' ? 'bg-cover bg-center' : ((state.wallpaper || 'clean') === 'clean' ? 'bg-[#09090C] bg-[radial-gradient(ellipse_at_top,rgba(63,137,246,0.09),transparent_58%)] text-white' : 'wp-' + state.wallpaper))}" ${!isPrivateMode && state.wallpaper === 'custom' && state.customWallpaperUrl ? `style="background-image:url('${safeImgUrl(state.customWallpaperUrl)}')"` : ''}>
+            <div id="message-feed" data-scroll-host="message-feed" class="flex-1 min-h-0 overflow-y-auto thin-scroll px-4 sm:px-6 pt-3 pb-28 space-y-2 ${ui.shoulderVeil ? 'shoulder-veil-on' : ''} ${isPrivateMode ? 'private-chat-box' : (state.wallpaper === 'custom' ? 'bg-cover bg-center' : ((state.wallpaper || 'clean') === 'clean' ? 'bg-[#FAFAFC] dark:bg-[#09090C] text-ink dark:text-white' : 'wp-' + state.wallpaper))}" ${!isPrivateMode && state.wallpaper === 'custom' && state.customWallpaperUrl ? `style="background-image:url('${safeImgUrl(state.customWallpaperUrl)}')"` : ''}>
               <div class="flex justify-center pb-2.5">
                 ${isPrivateMode ? `
                   <div class="flex flex-col items-center gap-2 py-2">
@@ -7966,7 +8450,7 @@
                   </div>
                 ` : `
 ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `<button type="button" data-action="load-older-msgs" data-id="${chat.id}" class="mr-2 px-3 py-1 rounded-full bg-white/15 text-[11px] font-semibold text-white hover:opacity-80 transition">${roomOlderLoading[chat.id] ? 'Loading...' : 'Load older'}</button>` : ''}
-                                    <span class="px-3.5 py-1 rounded-full bg-white/12 border border-white/15 backdrop-blur-md text-[11px] font-semibold text-white/85 tracking-tight">Today</span>
+                                    <span class="px-3.5 py-1 rounded-full bg-black/[0.06] dark:bg-white/12 border border-black/[0.08] dark:border-white/15 backdrop-blur-md text-[11px] font-semibold text-ink/75 dark:text-white/85 tracking-tight">Today</span>
                 `}
               </div>
               ${(ui.inChatSearchQuery ? activeMessages.filter(m => String(m.text || m.title || m.note || m.question || '').toLowerCase().includes(ui.inChatSearchQuery.toLowerCase())) : activeMessages).map(m => renderBubble(chat, m)).join('')}
@@ -7977,7 +8461,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 Shoulder Veil On • Double-tap to reveal
               </button>
             ` : ''}
-            <button id="chat-scroll-jump-btn" type="button" data-action="chat-scroll-jump" data-dir="down" aria-label="Jump to bottom or top" class="opacity-0 pointer-events-none translate-y-2 absolute bottom-[92px] right-4 sm:right-6 z-30 w-10 h-10 rounded-full bg-[#1C1C24]/90 border border-white/15 backdrop-blur-xl text-white flex items-center justify-center transition-all duration-200 active:scale-95">
+            <button id="chat-scroll-jump-btn" type="button" data-action="chat-scroll-jump" data-dir="down" aria-label="Jump to bottom or top" class="opacity-0 pointer-events-none translate-y-2 absolute bottom-[92px] right-4 sm:right-6 z-30 w-10 h-10 rounded-full bg-white/95 dark:bg-[#1C1C24]/90 border border-black/[0.08] dark:border-white/15 backdrop-blur-xl text-ink dark:text-white flex items-center justify-center shadow-md transition-all duration-200 active:scale-95">
               <svg class="w-[18px] h-[18px] transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
             </button>
 
@@ -8014,32 +8498,68 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                   <span class="text-[13px] font-medium text-rose-700 dark:text-rose-300">You blocked ${escapeHtml(chat.name)}.</span>
                   <button type="button" data-action="toggle-block" data-id="${chat.id}" data-name="${escapeHtml(chat.name)}" class="px-3.5 py-1.5 rounded-full bg-white dark:bg-zinc-900 text-[12.5px] font-semibold text-ink dark:text-white shadow-sm hover:bg-brand-500 hover:text-white transition shrink-0">Unblock</button>
                 </div>
-              ` : ui.walkieActive ? `
-                <div class="${isPrivateMode ? 'glass-dark-pill' : 'soft-bw-glass'} rounded-full px-3 py-2 flex items-center gap-2.5 border border-[#C6A76D]/55 shadow-[0_0_20px_-6px_rgba(198,167,109,0.45)]">
-                  <div class="flex items-center gap-2 pl-1.5 min-w-0">
-                    <span class="w-2.5 h-2.5 rounded-full bg-[#C6A76D] ${ui.walkieSpeaking || ui.walkiePeerSpeaking ? 'animate-ping' : 'animate-pulse'} shrink-0"></span>
-                    <div class="flex items-center gap-[3px] h-5 shrink-0">
-                      ${[0,1,2,3,4].map(i => `<span class="walkie-bar ${(ui.walkieSpeaking || ui.walkiePeerSpeaking) ? '' : 'walkie-bar-idle'}" style="animation-delay:${i * 110}ms"></span>`).join('')}
-                    </div>
-                    <span class="text-[12.5px] font-bold tracking-tight ${isPrivateMode ? 'text-white' : 'text-ink dark:text-white'} truncate">${ui.walkieSpeaking ? 'Transmitting live...' : (ui.walkiePeerSpeaking ? `${escapeHtml(chat.name.split(' ')[0])} speaking...` : 'Walkie-Talkie')}</span>
+              ` : ui.sketchActive ? `
+                <div class="${isPrivateMode ? 'glass-dark-pill' : 'bg-white/80 dark:bg-[#14141B]/80 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.16]'} rounded-full px-2.5 py-1.5 flex items-center justify-between gap-1.5 shadow-lg overflow-x-auto no-scrollbar">
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button type="button" data-action="sketch-tool" data-tool="pen" title="Pencil" class="w-8 h-8 rounded-full flex items-center justify-center transition ${ui.sketchTool !== 'eraser' ? 'bg-[#3F89F6] text-white shadow-sm' : 'text-ink dark:text-white hover:bg-black/5 dark:hover:bg-white/10'}">
+                      ${icon('edit', 'w-4 h-4')}
+                    </button>
+                    <button type="button" data-action="sketch-tool" data-tool="eraser" title="Eraser" class="w-8 h-8 rounded-full flex items-center justify-center transition ${ui.sketchTool === 'eraser' ? 'bg-[#3F89F6] text-white shadow-sm' : 'text-ink dark:text-white hover:bg-black/5 dark:hover:bg-white/10'}">
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+                    </button>
                   </div>
-                  <button type="button" id="walkie-ptt-btn" class="ml-auto px-4 py-2 rounded-full ${ui.walkieSpeaking ? 'bg-[#C6A76D] text-white scale-95' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} text-[12.5px] font-bold select-none transition shrink-0" style="touch-action: none;">
-                    ${ui.walkieSpeaking ? 'Live...' : 'Hold to Talk'}
-                  </button>
-                  <button type="button" data-action="stop-walkie" title="Close Walkie-Talkie" class="w-8 h-8 rounded-full bg-black/[0.06] dark:bg-white/[0.1] ${isPrivateMode ? 'text-white' : 'text-ink dark:text-white'} flex items-center justify-center shrink-0">
-                    ${icon('close', 'w-4 h-4')}
-                  </button>
+                  <span class="w-px h-5 bg-black/10 dark:bg-white/15 shrink-0"></span>
+                  <div class="flex items-center gap-1.5 shrink-0">
+                    ${[
+                      { id: 'adaptive', cls: 'bg-[#09090C] dark:bg-white' },
+                      { id: '#3F89F6', cls: 'bg-[#3F89F6]' },
+                      { id: '#C6A76D', cls: 'bg-[#C6A76D]' },
+                      { id: '#FF3B30', cls: 'bg-[#FF3B30]' }
+                    ].map(c => `
+                      <button type="button" data-action="sketch-color" data-color="${c.id}" class="w-5 h-5 rounded-full ${c.cls} ${ui.sketchColor === c.id ? 'ring-2 ring-offset-2 ring-[#3F89F6] scale-110' : 'opacity-80 hover:opacity-100'} transition shrink-0"></button>
+                    `).join('')}
+                  </div>
+                  <span class="w-px h-5 bg-black/10 dark:bg-white/15 shrink-0"></span>
+                  <div class="flex items-center gap-1.5 shrink-0">
+                    ${[
+                      { sz: 2.5, dot: 'w-2 h-2', lbl: 'Thin' },
+                      { sz: 5, dot: 'w-3 h-3', lbl: 'Medium' },
+                      { sz: 9, dot: 'w-4 h-4', lbl: 'Bold' }
+                    ].map(s => `
+                      <button type="button" data-action="sketch-size" data-size="${s.sz}" title="${s.lbl}" class="w-6 h-6 rounded-full flex items-center justify-center ${Number(ui.sketchSize || 5) === s.sz ? 'bg-black/10 dark:bg-white/20' : 'hover:bg-black/5 dark:hover:bg-white/10'} transition">
+                        <span class="${s.dot} rounded-full bg-ink dark:bg-white"></span>
+                      </button>
+                    `).join('')}
+                  </div>
+                  <span class="w-px h-5 bg-black/10 dark:bg-white/15 shrink-0"></span>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button type="button" data-action="sketch-undo" title="Undo" class="px-2 py-1 rounded-full text-[11.5px] font-semibold text-ink dark:text-white hover:bg-black/5 dark:hover:bg-white/10 transition">Undo</button>
+                    <button type="button" data-action="sketch-clear" title="Clear" class="px-2 py-1 rounded-full text-[11.5px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-500/15 transition">Clear</button>
+                    <button type="button" data-action="stop-sketch" title="Close Sketch" class="w-7 h-7 rounded-full bg-black/[0.06] dark:bg-white/[0.12] text-ink dark:text-white flex items-center justify-center shrink-0">
+                      ${icon('close', 'w-3.5 h-3.5')}
+                    </button>
+                  </div>
                 </div>
               ` : ui.recordingVoice ? `
-                <div class="flex items-center justify-between gap-2 bg-[#09090C] dark:bg-white rounded-full px-3.5 py-2 shadow-md">
-                  <span class="text-[13.5px] font-semibold text-white dark:text-[#09090C] flex items-center gap-2 pl-1 tabular-nums">
-                    <span class="w-2 h-2 rounded-full ${ui.recordingPaused ? 'bg-zinc-400' : 'bg-rose-500 animate-pulse'}"></span>
-                    <span>${ui.recordingPaused ? 'Paused' : 'Rec'} 0:${String(ui.recordSeconds).padStart(2, '0')}</span>
-                  </span>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    <button type="button" data-action="cancel-voice" class="px-3 py-1.5 rounded-full bg-white/15 dark:bg-black/10 text-rose-400 dark:text-rose-600 text-[12.5px] font-semibold hover:opacity-85 transition">Delete</button>
-                    <button type="button" data-action="toggle-pause-voice" class="px-3 py-1.5 rounded-full bg-white/15 dark:bg-black/10 text-white dark:text-[#09090C] text-[12.5px] font-semibold hover:opacity-85 transition">${ui.recordingPaused ? 'Resume' : 'Pause'}</button>
-                    <button type="button" data-action="send-voice-now" class="px-3.5 py-1.5 rounded-full bg-white text-[#09090C] dark:bg-[#09090C] dark:text-white text-[12.5px] font-bold hover:opacity-90 transition">Send</button>
+                <div class="space-y-3">
+                  <div class="rounded-full px-5 py-3 bg-white/75 dark:bg-white/[0.12] backdrop-blur-2xl border border-black/[0.08] dark:border-white/25 shadow-[inset_0_1px_1px_rgba(255,255,255,0.45),0_12px_30px_-8px_rgba(0,0,0,0.35)] flex items-center justify-between gap-4">
+                    <span id="rec-timer-label" class="text-[18px] font-bold tabular-nums text-ink dark:text-white tracking-tight shrink-0">${Math.floor(ui.recordSeconds / 60)}:${String(ui.recordSeconds % 60).padStart(2, '0')}</span>
+                    <div class="flex items-center justify-end gap-[3.5px] h-6 flex-1 min-w-0 overflow-hidden">
+                      ${[18, 22, 38, 52, 24, 18, 18, 20, 18, 18, 18, 20, 18, 18, 18, 22, 18, 18, 18, 20, 56, 78, 86, 62, 34, 24, 20, 18].map((h, i) => `
+                        <span class="w-[2.5px] rounded-full bg-ink/75 dark:bg-white/85 ${ui.recordingPaused ? '' : 'wave-bar'}" style="height:${h}%; animation-delay:${(i % 7) * 0.08}s"></span>
+                      `).join('')}
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-between px-1">
+                    <button type="button" data-action="cancel-voice" title="Delete" class="w-12 h-12 rounded-full bg-rose-500/20 backdrop-blur-xl border border-rose-400/40 text-rose-500 flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition">
+                      ${icon('trash', 'w-5 h-5')}
+                    </button>
+                    <button type="button" data-action="toggle-pause-voice" title="${ui.recordingPaused ? 'Resume' : 'Pause'}" class="w-12 h-12 rounded-full bg-white/75 dark:bg-white/[0.14] backdrop-blur-xl border border-black/[0.08] dark:border-white/30 text-ink dark:text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition">
+                      ${icon(ui.recordingPaused ? 'play' : 'pause', 'w-5 h-5')}
+                    </button>
+                    <button type="button" data-action="send-voice-now" title="Send" class="w-12 h-12 rounded-full bg-[#09090C] text-white dark:bg-white dark:text-[#09090C] flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition">
+                      <svg class="w-5 h-5 translate-x-[1px]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 20.85 12.92a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>
+                    </button>
                   </div>
                 </div>
               ` : ui.pendingVoiceDraft ? `
@@ -8068,21 +8588,21 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         ${(ui.ringPingChats && ui.ringPingChats[chat.id] > Date.now()) ? '<span class="ring-ping-wave" aria-hidden="true"></span><span class="ring-ping-wave ring-ping-wave-2" aria-hidden="true"></span>' : ''}
                         <div id="plus-ring-inner" class="relative ${isOnlineNow ? 'online-plus-ring' : ''} rounded-full">
                           <svg id="plus-ring-solid" class="ring-second-layer ${(isInChatNow && !isTypingNow) ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
-                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#3F89F6" stroke-width="3.2"/>
+                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2"/>
                           </svg>
                           <svg id="plus-ring-dotted" class="ring-second-layer ring-second-dotted ${(isInChatNow && isTypingNow) ? 'opacity-100' : 'opacity-0 pointer-events-none'}" viewBox="0 0 64 64" aria-hidden="true">
-                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#3F89F6" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
+                            <circle cx="32" cy="32" r="29.5" fill="none" stroke="#C6A76D" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1.2 6.4"/>
                           </svg>
-                          <button id="chat-plus-btn" type="button" data-action="toggle-attach" title="Tap for menu • Double-tap for timer" class="${ui.attachMenuOpen ? 'bg-[#3F89F6] text-white' : 'bg-[#17171D]/95 text-white border border-white/[0.1]'} ${isOnlineNow ? 'w-[38px] h-[38px]' : 'w-12 h-12'} rounded-full flex items-center justify-center select-none">
+                          <button id="chat-plus-btn" type="button" data-action="toggle-attach" title="Tap for menu • Double-tap for timer" class="${ui.attachMenuOpen ? 'bg-[#3F89F6] text-white' : 'bg-white/95 dark:bg-[#17171D]/95 text-ink dark:text-white border border-black/[0.08] dark:border-white/[0.1]'} ${isOnlineNow ? 'w-[38px] h-[38px]' : 'w-12 h-12'} rounded-full flex items-center justify-center shadow-sm select-none">
                             ${icon(ui.attachMenuOpen ? 'close' : 'plus', 'w-[22px] h-[22px]')}
                           </button>
                         </div>
                       </div>
                     `;
                   })()}
-                  <div id="composer-pill" class="bg-[#16161E]/95 border border-white/[0.14] focus-within:border-[#3F89F6]/70 focus-within:ring-2 focus-within:ring-[#3F89F6]/20 backdrop-blur-xl ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5 shadow-[0_10px_28px_-8px_rgba(0,0,0,0.65)] transition">
-                    <input id="message-input" type="text" enterkeyhint="send" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] text-white placeholder:text-white/45 focus:outline-none" />
-                    <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white/80 hover:text-white hover:bg-white/10 transition">
+                  <div id="composer-pill" class="bg-[#F1F2F6]/95 dark:bg-[#22232B]/95 border-0 focus-within:ring-0 focus-within:outline-none backdrop-blur-xl ${ui.typingRhythm === 'fast' ? 'rhythm-fast-glass' : (ui.typingRhythm === 'calm' ? 'rhythm-calm-glass' : '')} flex-1 min-w-0 h-12 rounded-full pl-4 pr-1.5 flex items-center gap-1.5 shadow-sm dark:shadow-none transition">
+                    <input id="message-input" type="text" enterkeyhint="send" value="${escapeHtml((ui.draftsByChat && ui.draftsByChat[chat.id]) || '')}" autocomplete="off" placeholder="${isPrivateMode ? 'Private message...' : 'Message...'}" class="w-full min-w-0 h-full bg-transparent text-[15.5px] font-medium tracking-[-0.015em] text-ink dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/45 focus:outline-none" />
+                    <button type="button" data-action="open-photo-picker" title="Gallery &amp; Camera" class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-ink/70 dark:text-white/80 hover:text-ink dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition">
                       ${icon('camera', 'w-[20px] h-[20px]')}
                     </button>
                   </div>
@@ -8093,7 +8613,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                       <path d="M9 4a5 5 0 0 1 0 10H6l8.5 7"/>
                     </svg>
                   </button>
-                  <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Hold &amp; swipe left for Walkie-Talkie" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full bg-white text-[#09090C] flex items-center justify-center shrink-0 shadow-[0_4px_14px_-4px_rgba(255,255,255,0.25)] transition-transform duration-150 hover:scale-105 active:scale-95">
+                  <button id="chat-mic-btn" type="button" data-action="start-voice" title="Tap to record • Swipe left for Live Sketch" style="touch-action: none;" class="relative z-20 w-12 h-12 rounded-full bg-white text-[#09090C] flex items-center justify-center shrink-0 shadow-[0_4px_14px_-4px_rgba(255,255,255,0.25)] transition-transform duration-150 hover:scale-105 active:scale-95">
                     ${icon('mic', 'w-[20px] h-[20px]')}
                   </button>
                   <button id="chat-send-btn" type="button" data-action="send-chat-now" title="Send" onpointerdown="event.preventDefault()" onmousedown="event.preventDefault()" ontouchstart="event.preventDefault()" class="hidden w-12 h-12 rounded-full bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white border border-white/20 flex items-center justify-center shadow-[0_6px_20px_-4px_rgba(63,137,246,0.62)] shrink-0 antialiased active:scale-90 transition-transform duration-150">
@@ -8105,7 +8625,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               ${ui.attachMenuOpen ? `
                 <div style="margin-bottom:max(1rem, env(safe-area-inset-bottom));" class="mx-3 sm:mx-auto sm:max-w-lg px-4 pt-3 pb-4 rounded-[42px] ${isPrivateMode ? 'attach-liquid-glass-dark' : 'attach-liquid-glass'} attach-shelf-rise">
                   <div class="w-8 h-1 rounded-full bg-black/15 dark:bg-white/25 mx-auto mb-3"></div>
-                  <div class="grid grid-cols-5 gap-1.5">
+                  <div class="grid grid-cols-3 gap-2">
                     <button type="button" data-action="open-modal" data-modal="poll" class="py-2.5 px-1.5 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
                       <span class="w-9 h-9 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shadow-sm">
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
@@ -8136,6 +8656,12 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="4"/></svg>
                       </span>
                       <span class="text-[11px] font-semibold tracking-[-0.01em]">Games</span>
+                    </button>
+                    <button type="button" data-action="start-screen-peek" class="py-2.5 px-1 rounded-[24px] bg-[#17171E]/95 border border-white/[0.12] backdrop-blur-xl hover:bg-[#20202A] flex flex-col items-center justify-center gap-1.5 text-white active:scale-95 transition shadow-lg">
+                      <span class="w-9 h-9 rounded-full bg-[#3F89F6] text-white flex items-center justify-center shadow-sm">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2.5"/><path d="M8 21h8M12 17v4"/></svg>
+                      </span>
+                      <span class="text-[11px] font-semibold tracking-[-0.01em]">Screen Peek</span>
                     </button>
                   </div>
                 </div>
@@ -8173,16 +8699,155 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         });
       }
 
+      let _holoParallaxInit = false;
+      function ensureHoloParallax() {
+        if (_holoParallaxInit) return;
+        _holoParallaxInit = true;
+        const setParallax = (tx, ty, rx, ry) => {
+          const root = document.documentElement;
+          root.style.setProperty('--holo-tx', tx.toFixed(1) + 'px');
+          root.style.setProperty('--holo-ty', ty.toFixed(1) + 'px');
+          root.style.setProperty('--holo-rx', rx.toFixed(1) + 'deg');
+          root.style.setProperty('--holo-ry', ry.toFixed(1) + 'deg');
+        };
+        if (window.DeviceOrientationEvent) {
+          window.addEventListener('deviceorientation', (ev) => {
+            if (ev.gamma == null && ev.beta == null) return;
+            const g = Math.max(-35, Math.min(35, Number(ev.gamma || 0)));
+            const b = Math.max(-35, Math.min(35, Number(ev.beta || 35) - 35));
+            setParallax(g * 0.6, b * 0.5, -b * 0.45, g * 0.55);
+          }, { passive: true });
+        }
+        window.addEventListener('pointermove', (ev) => {
+          if (ev.pointerType === 'touch') return;
+          const nx = (ev.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
+          const ny = (ev.clientY / Math.max(1, window.innerHeight)) * 2 - 1;
+          setParallax(nx * 16, ny * 14, -ny * 14, nx * 16);
+        }, { passive: true });
+      }
+
+      function launchHoloReaction(emoji, msgId, isSelf = false) {
+        if (!emoji) return;
+        ensureHoloParallax();
+        try {
+          if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function' && isSelf) {
+            DeviceOrientationEvent.requestPermission().catch(() => {});
+          }
+        } catch (_) {}
+
+        const orb = document.createElement('div');
+        orb.className = 'holo-orb-float';
+        const startX = isSelf ? window.innerWidth * 0.62 : window.innerWidth * 0.28;
+        const startY = window.innerHeight * 0.72;
+        const midX = window.innerWidth * 0.5 + (isSelf ? -26 : 26);
+        const midY = window.innerHeight * 0.36;
+
+        orb.style.left = '0px';
+        orb.style.top = '0px';
+        orb.style.transform = `translate3d(${startX - 36}px, ${startY - 36}px, 0) scale(0.5)`;
+        orb.style.opacity = '0';
+        orb.innerHTML = `<div class="holo-orb-inner w-[72px] h-[72px] text-[38px] select-none">${emoji}</div>`;
+        document.body.appendChild(orb);
+
+        const targetEl = document.querySelector(`[data-msg-bubble="${msgId}"] [data-bubble-inner]`);
+        const rect = targetEl ? targetEl.getBoundingClientRect() : null;
+        const endX = rect ? (rect.left + rect.width * (isSelf ? 0.8 : 0.2)) : window.innerWidth * 0.5;
+        const endY = rect ? (rect.bottom - 6) : window.innerHeight * 0.48;
+
+        requestAnimationFrame(() => {
+          orb.style.transition = 'transform 620ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease-out';
+          orb.style.opacity = '1';
+          orb.style.transform = `translate3d(${midX - 36}px, ${midY - 36}px, 0) scale(1.22)`;
+        });
+
+        setTimeout(() => {
+          orb.style.transition = 'transform 560ms cubic-bezier(0.32, 0.72, 0, 1), opacity 220ms ease-in 340ms';
+          orb.style.transform = `translate3d(${endX - 36}px, ${endY - 36}px, 0) scale(0.36)`;
+          orb.style.opacity = '0.95';
+        }, 680);
+
+        setTimeout(() => {
+          const spark = document.createElement('div');
+          spark.className = 'holo-spark-ring';
+          spark.style.left = (endX - 18) + 'px';
+          spark.style.top = (endY - 18) + 'px';
+          spark.style.width = '36px';
+          spark.style.height = '36px';
+          document.body.appendChild(spark);
+          triggerHaptic(10);
+          setTimeout(() => spark.remove(), 550);
+          orb.remove();
+        }, 1240);
+      }
+
+      function broadcastHoloReaction(roomId, msgId, emoji) {
+        if (!supaRealtimeChan || !roomId || !msgId || !emoji) return;
+        try {
+          supaRealtimeChan.send({
+            type: 'broadcast',
+            event: 'holo_react_fast',
+            payload: {
+              roomId,
+              msgId,
+              emoji,
+              fromId: activeVaultId,
+              fromName: (state && state.userProfile && state.userProfile.name) || 'Friend'
+            }
+          });
+        } catch (_) {}
+      }
+
+      function applyUserReaction(msg, em) {
+        if (!msg || !em) return false;
+        const uid = activeVaultId || 'local_me';
+        msg.userReactions = (msg.userReactions && typeof msg.userReactions === 'object') ? msg.userReactions : {};
+        const prevMine = msg.userReactions[uid];
+        let added = false;
+        if (prevMine === em) {
+          delete msg.userReactions[uid];
+        } else {
+          msg.userReactions[uid] = em;
+          added = true;
+        }
+        const vals = Object.values(msg.userReactions).filter(Boolean);
+        msg.reactions = vals;
+        return added;
+      }
+
+      function broadcastMsgUpdate(roomId, msg) {
+        if (!supaRealtimeChan || !roomId || !msg || !msg.id) return;
+        try {
+          supaRealtimeChan.send({
+            type: 'broadcast',
+            event: 'msg_update_fast',
+            payload: { roomId, msgId: msg.id, msg }
+          });
+        } catch (_) {}
+      }
+
+      function patchMsgMenuInPlace(prevId, nextId) {
+        const chat = getSelectedChat();
+        if (!chat) return;
+        const ids = Array.from(new Set([prevId, nextId].filter(Boolean)));
+        ids.forEach(id => {
+          const el = document.querySelector(`[data-msg-bubble="${id}"]`);
+          const m = (chat.messages || []).find(x => x.id === id);
+          if (el && m) {
+            el.outerHTML = renderBubble(chat, m).replace('animate-fade', '');
+          }
+        });
+      }
+
       function renderBubble(chat, msg) {
         if (msg && msg.mistDissolve && msg.mistState === 'dissolved') return '';
         const isMe = msg.sender === 'me';
         const hasReply = Boolean(msg.replyTo);
         const cls = isMe
-          ? `bg-gradient-to-br from-[#4D96FF] to-[#2B73E8] text-white border border-white/[0.16] shadow-[0_6px_20px_-4px_rgba(63,137,246,0.48)] rounded-[16px] rounded-br-[5px]`
-          : `bg-[#1A1A23] text-white border border-white/[0.1] shadow-[0_4px_16px_-4px_rgba(0,0,0,0.5)] rounded-[16px] rounded-bl-[5px]`;
+          ? `bg-[#3F89F6] text-white shadow-[0_2px_10px_-4px_rgba(63,137,246,0.3)] rounded-[20px] rounded-tr-[4px]`
+          : `bg-[#F1F2F6] dark:bg-[#272830] text-ink dark:text-[#F3F4F6] shadow-[0_2px_8px_-4px_rgba(0,0,0,0.08)] dark:shadow-none rounded-[20px] rounded-tl-[4px]`;
 
         const metaHtml = `
-          <span class="inline-flex items-center gap-1 text-[10px] font-medium tabular-nums tracking-[-0.01em] leading-none select-none ${isMe ? 'text-white/80' : 'text-white/55'}">
+          <span class="inline-flex items-center gap-1 text-[10px] font-medium tabular-nums tracking-[-0.01em] leading-none select-none ${isMe ? 'text-white/80' : 'text-zinc-500 dark:text-white/55'}">
             ${msg.edited ? '<span class="italic">edited</span>' : ''}
             <span>${escapeHtml(msg.time)}</span>
             ${isMe ? renderTicks(msg.status, true) : ''}
@@ -8190,7 +8855,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         `;
 
         let body = '';
-        if (msg.type === 'text') {
+        if (msg.deleted) {
+          body = `<div class="inline-flex items-center gap-1.5 py-0.5 text-[12.5px] italic opacity-70"><svg class="w-3.5 h-3.5 opacity-80 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/></svg><span>Chat deleted</span></div>`;
+        } else if (msg.type === 'text') {
           if (msg.viewOnce && msg.viewedOnce) {
             body = `<div class="inline-flex items-center gap-1.5 py-0.5 text-[12.5px] italic opacity-75"><span>①</span><span>Once View • Burned</span></div>`;
           } else if (msg.viewOnce) {
@@ -8200,7 +8867,8 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           } else if (msg.mistDissolve && msg.mistState === 'sealed') {
             body = `<button type="button" data-action="open-mist" data-id="${msg.id}" class="text-left py-1 flex items-center gap-2 text-[13.5px] font-semibold"><span class="w-2 h-2 rounded-full bg-current opacity-70 animate-pulse"></span><span>Mist Note • Tap to read</span></button>`;
           } else {
-            body = `<div class="relative ${(msg.mistDissolve && msg.mistState === 'dissolving') ? 'overflow-hidden rounded-lg' : ''}">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14px] leading-[1.42] tracking-[-0.01em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
+            const wtMatch = parseWatchTogetherUrl(msg.text || '');
+            body = `<div class="relative ${(msg.mistDissolve && msg.mistState === 'dissolving') ? 'overflow-hidden rounded-lg' : ''}">${msg.forwarded ? '<div class="text-[10px] italic opacity-75 mb-0.5">Forwarded</div>' : ''}<div class="flow-root text-[14.5px] leading-[1.42] tracking-[-0.012em] font-normal break-words"><span class="whitespace-pre-wrap">${formatRichMessageText(msg.text || '')}</span><span class="float-right ml-2.5 mt-[5px] whitespace-nowrap">${metaHtml.trim()}</span></div>${wtMatch ? `<button type="button" data-action="start-watch-together" data-url="${escapeHtml(wtMatch.url)}" class="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${isMe ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-[#3F89F6]/15 hover:bg-[#3F89F6]/25 text-[#3F89F6]'} text-[11.5px] font-bold transition"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg><span>Watch Together</span></button>` : ''}${(msg.mistDissolve && msg.mistState === 'dissolving') ? `<span style="animation-duration:${msg.mistSeconds === 0 ? 1.1 : (msg.mistSeconds || 8)}s" class="mist-dissolve-curtain ${isMe ? 'mist-curtain-dark' : ''}" aria-hidden="true"></span>` : ''}</div>`;
           }
         } else if (msg.type === 'tug') {
           const p = Math.max(0, Math.min(100, Number(msg.pos ?? 50)));
@@ -8387,22 +9055,33 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           `;
         } else if (msg.type === 'voice') {
           const playing = ui.playingVoiceId === msg.id;
+          const vSpeed = Number(ui.voiceSpeed || 1);
+          const trimOn = ui.voiceTrimSilence !== false;
+          const waveHeights = [32, 56, 82, 48, 92, 68, 42, 86, 62, 95, 52, 74, 38, 88, 64, 46, 78, 54, 90, 60, 44, 72, 50, 36];
           if (msg.viewOnce && msg.viewedOnce) {
             body = `<div class="inline-flex items-center gap-1.5 px-1 py-0.5 text-[12.5px] italic opacity-75"><span>①</span><span>Voice note played • Burned</span></div>`;
           } else {
             body = `
-              <div class="w-56 space-y-1">
-                ${msg.viewOnce ? '<div class="text-[10.5px] font-bold text-[#C6A76D] tracking-wide uppercase flex items-center gap-1"><span>①</span><span>View Once Voice</span></div>' : ''}
-                <div class="flex items-center gap-2.5">
-                  <button data-action="play-voice" data-id="${msg.id}" class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center ${msg.viewOnce ? 'bg-[#C6A76D] text-white' : (isMe ? 'bg-white text-brand-500' : 'bg-brand-500 text-white')}">
-                    ${icon(playing ? 'pause' : 'play', 'w-3.5 h-3.5')}
+              <div class="w-[242px] sm:w-[262px] space-y-2 py-0.5" data-voice-card="${msg.id}">
+                ${msg.viewOnce ? '<div class="text-[10px] font-bold text-[#C6A76D] tracking-wider uppercase flex items-center gap-1"><span>①</span><span>View Once Voice</span></div>' : ''}
+                <div class="flex items-center gap-3">
+                  <button type="button" data-action="play-voice" data-id="${msg.id}" class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center shadow-sm active:scale-95 transition ${msg.viewOnce ? 'bg-[#C6A76D] text-white' : (isMe ? 'bg-white text-[#3F89F6]' : 'bg-[#3F89F6] text-white')}">
+                    ${icon(playing ? 'pause' : 'play', 'w-4 h-4')}
                   </button>
-                  <div class="flex-1 flex items-end gap-1 h-6">
-                    ${[40, 80, 55, 95, 65, 85, 45, 75, 60, 85].map((h, i) => `
-                      <div class="flex-1 rounded-full ${msg.viewOnce ? 'bg-[#C6A76D]/80' : (isMe ? 'bg-white/80' : 'bg-brand-500/70')} ${playing ? 'wave-bar' : ''}" style="height:${h}%; animation-delay:${i * 0.06}s"></div>
-                    `).join('')}
+                  <div class="flex-1 min-w-0 space-y-1.5">
+                    <div class="flex items-center gap-[2.5px] h-7" data-voice-wave="${msg.id}">
+                      ${waveHeights.map((h, i) => `
+                        <div data-wbar="${i}" class="flex-1 rounded-full transition-all duration-150 ${msg.viewOnce ? 'bg-[#C6A76D]/85' : (isMe ? 'bg-white/40' : 'bg-[#3F89F6]/35')} ${playing ? 'wave-bar' : ''}" style="height:${h}%; animation-delay:${(i % 8) * 0.06}s"></div>
+                      `).join('')}
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                      <span data-voice-time="${msg.id}" class="text-[10.5px] font-semibold tabular-nums opacity-80">${escapeHtml(msg.duration || '0:00')}</span>
+                      <div class="flex items-center gap-1">
+                        <button type="button" data-action="cycle-voice-speed" title="Playback speed (1x / 1.5x / 2x)" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold tabular-nums transition ${isMe ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-black/[0.07] dark:bg-white/[0.12] hover:bg-black/[0.12] text-ink dark:text-white'}">${vSpeed}×</button>
+                        <button type="button" data-action="toggle-voice-trim" title="Auto-skip awkward 2s pauses" class="px-2 py-0.5 rounded-full text-[10px] font-bold transition ${trimOn ? (isMe ? 'bg-[#C6A76D] text-white' : 'bg-[#C6A76D]/20 text-[#C6A76D]') : (isMe ? 'bg-white/10 text-white/60' : 'bg-black/[0.05] dark:bg-white/[0.08] text-muted')}">Trim</button>
+                      </div>
+                    </div>
                   </div>
-                  <span class="text-[11px] font-sans tabular-nums opacity-80">${escapeHtml(msg.duration)}</span>
                 </div>
               </div>
             `;
@@ -8454,33 +9133,56 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           `;
         }
 
+        const isMenuOpen = Boolean(!msg.deleted && ui && ui.activeMsgMenuId === msg.id);
+        const floatingReactionPill = isMenuOpen ? `
+          <div data-msg-menu-wrap class="absolute bottom-full mb-2.5 ${isMe ? 'right-0' : 'left-0'} z-40 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white/80 dark:bg-[#232329]/75 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.16] shadow-[0_14px_34px_-8px_rgba(0,0,0,0.45)] whitespace-nowrap">
+            ${['👍', '❤️', '😂', '😮', '😢', '🙏'].map(em => `
+              <button type="button" data-action="msg-ctx-react" data-id="${msg.id}" data-emoji="${em}" class="w-8 h-8 rounded-full hover:bg-black/[0.06] dark:hover:bg-white/[0.14] text-[20px] flex items-center justify-center transition hover:scale-115 active:scale-95">${em}</button>
+            `).join('')}
+          </div>
+        ` : '';
+        const floatingContextCard = isMenuOpen ? `
+          <div data-msg-menu-wrap class="absolute top-full mt-2.5 ${isMe ? 'right-0' : 'left-0'} z-40 w-[216px] p-1.5 rounded-[22px] bg-white/82 dark:bg-[#1E1E24]/75 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.16] shadow-[0_20px_50px_-10px_rgba(0,0,0,0.55)] flex flex-col gap-0.5 text-ink dark:text-white">
+            <button type="button" data-action="msg-ctx-reply" data-id="${msg.id}" class="w-full px-3.5 py-2.5 rounded-[15px] text-left text-[15px] font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.12] flex items-center gap-3 transition">
+              ${icon('reply', 'w-[18px] h-[18px] opacity-85')}<span>Reply</span>
+            </button>
+            ${msg.type === 'text' ? `
+              <button type="button" data-action="msg-ctx-forward" data-id="${msg.id}" class="w-full px-3.5 py-2.5 rounded-[15px] text-left text-[15px] font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.12] flex items-center gap-3 transition">
+                ${icon('forward', 'w-[18px] h-[18px] opacity-85')}<span>Forward</span>
+              </button>
+              <button type="button" data-action="msg-ctx-copy" data-id="${msg.id}" class="w-full px-3.5 py-2.5 rounded-[15px] text-left text-[15px] font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.12] flex items-center gap-3 transition">
+                ${icon('copy', 'w-[18px] h-[18px] opacity-85')}<span>Copy</span>
+              </button>
+            ` : ''}
+            ${(msg.type === 'text' && isMe) ? `
+              <button type="button" data-action="msg-ctx-edit" data-id="${msg.id}" class="w-full px-3.5 py-2.5 rounded-[15px] text-left text-[15px] font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.12] flex items-center gap-3 transition">
+                ${icon('edit', 'w-[18px] h-[18px] opacity-85')}<span>Edit</span>
+              </button>
+            ` : ''}
+            <div class="my-1 h-px bg-black/[0.08] dark:bg-white/[0.12] mx-2"></div>
+            <button type="button" data-action="msg-ctx-delete" data-id="${msg.id}" class="w-full px-3.5 py-2.5 rounded-[15px] text-left text-[15px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/15 flex items-center gap-3 transition">
+              ${icon('trash', 'w-[18px] h-[18px]')}<span>Delete</span>
+            </button>
+          </div>
+        ` : '';
         return `
-          <div data-msg-bubble="${msg.id}" data-msg-sig="${escapeHtml(getMsgSig(msg))}" data-msg-side="${isMe ? 'me' : 'other'}" class="group relative flex flex-col ${isMe ? 'items-end pl-10' : 'items-start pr-10'} animate-fade will-change-transform">
+          <div data-msg-bubble="${msg.id}" data-msg-sig="${escapeHtml(getMsgSig(msg))}" data-msg-side="${isMe ? 'me' : 'other'}" class="group relative ${isMenuOpen ? 'z-30' : ''} flex flex-col ${isMe ? 'items-end pl-14 sm:pl-20' : 'items-start pr-14 sm:pr-20'} animate-fade will-change-transform">
             <span data-swipe-reply-icon class="pointer-events-none absolute ${isMe ? 'right-0 translate-x-10' : 'left-0 -translate-x-10'} top-1/2 -translate-y-1/2 w-8 h-8 rounded-full glass-pill text-ink dark:text-white flex items-center justify-center opacity-0 scale-75 transition-opacity">
               ${icon('reply', 'w-4 h-4')}
             </span>
-            <div data-bubble-inner class="max-w-[82%] sm:max-w-[60%] px-4 py-2.5 ${cls}">
-              ${!isMe && chat.isGroup ? `<div class="text-[11px] font-semibold text-brand-500 mb-0.5">${escapeHtml(msg.senderName)}</div>` : ''}
-              ${msg.replyTo ? `<div class="mb-1.5 px-2.5 py-1.5 rounded-[12px] border-l-[3px] border-[#C6A76D] ${isMe ? 'bg-white/[0.11] dark:bg-black/[0.06]' : 'bg-black/[0.045] dark:bg-white/[0.07]'} flex flex-col gap-0.5 min-w-0"><span class="text-[11px] font-bold tracking-tight text-[#C6A76D] truncate">${escapeHtml(msg.replyTo.sender || 'Message')}</span><span class="text-[12px] leading-snug opacity-85 line-clamp-2 break-words">${escapeHtml(msg.replyTo.text || '')}</span></div>` : ''}
+            <div data-bubble-inner class="relative max-w-[74%] sm:max-w-[54%] px-4 py-2.5 ${cls}">
+              ${floatingReactionPill}
+              ${!isMe && chat.isGroup && !msg.deleted ? `<div class="text-[11px] font-semibold text-brand-500 mb-0.5">${escapeHtml(msg.senderName)}</div>` : ''}
+              ${msg.replyTo && !msg.deleted ? `<div class="mb-1.5 px-2.5 py-1.5 rounded-[12px] border-l-[3px] border-[#C6A76D] ${isMe ? 'bg-white/[0.11] dark:bg-black/[0.06]' : 'bg-black/[0.045] dark:bg-white/[0.07]'} flex flex-col gap-0.5 min-w-0"><span class="text-[11px] font-bold tracking-tight text-[#C6A76D] truncate">${escapeHtml(msg.replyTo.sender || 'Message')}</span><span class="text-[12px] leading-snug opacity-85 line-clamp-2 break-words">${escapeHtml(msg.replyTo.text || '')}</span></div>` : ''}
               ${body}
-              ${msg.type !== 'text' ? `<div class="flex items-center justify-end gap-1 mt-1">${metaHtml}</div>` : ''}
+              ${(msg.type !== 'text' || msg.deleted) ? `<div class="flex items-center justify-end gap-1 mt-1">${metaHtml}</div>` : ''}
+              ${floatingContextCard}
             </div>
-            ${msg.reactions && msg.reactions.length > 0 ? `
+            ${(!msg.deleted && msg.reactions && msg.reactions.length > 0 && !isMenuOpen) ? `
               <div class="relative z-10 -mt-2.5 mb-1 ${isMe ? 'mr-2' : 'ml-2'} inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#1E1E28]/95 border border-white/[0.15] text-[15.5px] leading-tight shadow-md backdrop-blur-md">
                 ${msg.reactions.map(r => `<span>${r}</span>`).join('')}
               </div>
             ` : ''}
-            <div class="msg-hover-bar hidden md:flex items-center gap-1 mt-1 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-1.5 py-1 rounded-full border border-zinc-100 dark:border-zinc-800 shadow-sm">
-              ${['❤️', '👍', '😂', '🙏'].map(em => `
-                <button data-action="react-msg" data-id="${msg.id}" data-emoji="${em}" class="w-6 h-6 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-[13px] flex items-center justify-center transition hover:scale-110">${em}</button>
-              `).join('')}
-              <span class="w-px h-3.5 bg-zinc-200 dark:bg-zinc-700 mx-0.5"></span>
-              <button data-action="reply-msg" data-id="${msg.id}" title="Reply" class="p-1 rounded-full text-muted hover:text-brand-500">${icon('reply', 'w-3.5 h-3.5')}</button>
-              ${msg.type === 'text' && isMe ? `<button data-action="edit-msg" data-id="${msg.id}" title="Edit" class="p-1 rounded-full text-muted hover:text-brand-500">${icon('edit', 'w-3.5 h-3.5')}</button>` : ''}
-              ${msg.type === 'text' ? `<button data-action="forward-msg" data-id="${msg.id}" title="Forward" class="p-1 rounded-full text-muted hover:text-brand-500">${icon('forward', 'w-3.5 h-3.5')}</button>` : ''}
-              ${msg.type === 'text' ? `<button data-action="copy-msg" data-id="${msg.id}" title="Copy" class="p-1 rounded-full text-muted hover:text-brand-500">${icon('copy', 'w-3.5 h-3.5')}</button>` : ''}
-              <button data-action="delete-msg" data-id="${msg.id}" title="Delete" class="p-1 rounded-full text-muted hover:text-rose-500">${icon('trash', 'w-3.5 h-3.5')}</button>
-            </div>
           </div>
         `;
       }
@@ -9091,9 +9793,23 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     </div>
                   </div>
                 ` : `
-                  <!-- Read Receipts Card -->
-                  <div class="p-5 ios-card rounded-3xl bg-[#14141C] border border-white/[0.08] space-y-3">
+                  <!-- Day & Night Mode + Read Receipts Card -->
+                  <div class="p-5 ios-card rounded-3xl bg-white dark:bg-[#14141C] border border-zinc-200/60 dark:border-white/[0.08] space-y-3">
                     <div class="flex items-center justify-between">
+                      <div>
+                        <div class="title-display text-[16px] font-bold tracking-[-0.02em] text-ink dark:text-white">Day &amp; Night mode</div>
+                        <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Choose your preferred appearance</div>
+                      </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2.5 pt-1">
+                      <button type="button" data-action="set-theme" data-mode="day" class="py-3 px-4 rounded-2xl flex items-center justify-center gap-2 text-[13.5px] font-semibold transition ${state.darkMode === false ? 'bg-[#3F89F6] text-white shadow-sm' : 'bg-surface dark:bg-zinc-900 text-ink dark:text-white/75'}">
+                        ${icon('sun', 'w-4 h-4')}<span>Day (Light)</span>
+                      </button>
+                      <button type="button" data-action="set-theme" data-mode="night" class="py-3 px-4 rounded-2xl flex items-center justify-center gap-2 text-[13.5px] font-semibold transition ${state.darkMode !== false ? 'bg-[#3F89F6] text-white shadow-sm' : 'bg-surface dark:bg-zinc-900 text-ink dark:text-white/75'}">
+                        ${icon('moon', 'w-4 h-4')}<span>Night (Dark)</span>
+                      </button>
+                    </div>
+                    <div class="pt-3 border-t border-zinc-100 dark:border-white/[0.08] flex items-center justify-between">
                       <div>
                         <div class="title-display text-[15px] font-bold tracking-[-0.02em]">Blue tick read receipts</div>
                         <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Show blue double ticks when messages are read</div>
@@ -9113,6 +9829,20 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                         <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Hide the World chat button in Rooms</div>
                       </div>
                       <button type="button" data-action="toggle-hide-world-chat" class="px-4 py-1.5 rounded-full ${(state.security && state.security.hideWorldChat) ? 'bg-brand-500 text-white' : 'bg-surface text-muted'} text-[12.5px] font-semibold transition">${(state.security && state.security.hideWorldChat) ? 'On' : 'Off'}</button>
+                    </div>
+                    <div class="pt-3 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between">
+                      <div>
+                        <div class="title-display text-[15px] font-bold tracking-[-0.02em]">Air-Gesture Call Controls</div>
+                        <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Palm to answer/mute • Wave to end (on-device)</div>
+                      </div>
+                      <button type="button" data-action="toggle-air-gestures" class="px-4 py-1.5 rounded-full ${(state.security && state.security.airGestureCalls !== false) ? 'bg-brand-500 text-white' : 'bg-surface dark:bg-zinc-900 text-muted'} text-[12.5px] font-semibold transition">${(state.security && state.security.airGestureCalls !== false) ? 'On' : 'Off'}</button>
+                    </div>
+                    <div class="pt-3 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between">
+                      <div>
+                        <div class="title-display text-[15px] font-bold tracking-[-0.02em]">Live Sketch</div>
+                        <div class="text-[13.5px] font-normal tracking-[-0.008em] leading-[1.35] text-muted">Draw live over chat when both are inside</div>
+                      </div>
+                      <button type="button" data-action="toggle-live-sketch" class="px-4 py-1.5 rounded-full ${(state.security && state.security.liveSketchEnabled !== false) ? 'bg-brand-500 text-white' : 'bg-surface dark:bg-zinc-900 text-muted'} text-[12.5px] font-semibold transition">${(state.security && state.security.liveSketchEnabled !== false) ? 'On' : 'Off'}</button>
                     </div>
                   </div>
 
@@ -9197,7 +9927,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                     const cOk = ps.camera === 'granted';
                     const mOk = ps.microphone === 'granted';
                     const rows = [
-                      { key: 'notifications', title: 'Notifications', desc: 'Calls, messages & Walkie-Talkie alerts', ico: 'bell', ok: nOk },
+                      { key: 'notifications', title: 'Notifications', desc: 'Calls & messages alerts', ico: 'bell', ok: nOk },
                       { key: 'camera', title: 'Camera', desc: 'Video calls, status photos & QR scanner', ico: 'camera', ok: cOk },
                       { key: 'microphone', title: 'Microphone', desc: 'Voice & video calls, voice notes & PTT', ico: 'mic', ok: mOk }
                     ];
@@ -9262,7 +9992,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                           { key: 'videoCall', label: 'Video call notification' },
                           { key: 'voiceCall', label: 'Call notification' },
                           { key: 'messages', label: 'Message notification' },
-                          { key: 'walkie', label: 'Walkie-talkie notification' },
+                          
                           { key: 'audio', label: 'Audio notification' },
                           { key: 'media', label: 'Photos and video notification' }
                         ];
@@ -9542,7 +10272,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const cOk = ps.camera === 'granted';
           const mOk = ps.microphone === 'granted';
           const rows = [
-            { key: 'notifications', title: 'Notifications', desc: 'Calls, messages & Walkie-Talkie alerts', ico: 'bell', ok: nOk },
+            { key: 'notifications', title: 'Notifications', desc: 'Calls & messages alerts', ico: 'bell', ok: nOk },
             { key: 'camera', title: 'Camera', desc: 'Video calls, status photos & QR scanner', ico: 'camera', ok: cOk },
             { key: 'microphone', title: 'Microphone', desc: 'Voice & video calls, voice notes & PTT', ico: 'mic', ok: mOk }
           ];
@@ -9872,7 +10602,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             </div>
             <div class="pt-3 space-y-1.5">
               <button type="button" data-action="toggle-contact-online" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
-                <span class="flex items-center gap-2.5"><span class="w-2.5 h-2.5 rounded-full ${isChatOnline(chat) ? (isPeerInChat(chat) ? 'bg-[#C6A76D] ring-2 ring-[#C6A76D]/50 ring-offset-1' : 'bg-[#C6A76D]') : 'bg-zinc-300 dark:bg-zinc-700'}"></span><span>Online status</span></span>
+                <span class="flex items-center gap-2.5"><span class="w-2.5 h-2.5 rounded-full ${isChatOnline(chat) ? (isPeerInChat(chat) ? 'bg-[#3F89F6] ring-2 ring-[#C6A76D]/70 ring-offset-1' : 'bg-[#3F89F6]') : 'bg-zinc-300 dark:bg-zinc-700'}"></span><span>Online status</span></span>
                 <span class="text-[12px] font-semibold ${isChatOnline(chat) ? ('text-[#C6A76D]') : 'text-muted'}">${isChatOnline(chat) ? (isPeerInChat(chat) ? 'In this chat' : 'Online') : 'Offline'}</span>
               </button>
               <button type="button" data-action="row-pin" data-id="${chat.id}" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl hover:bg-surface dark:hover:bg-zinc-900 text-[14px] font-medium transition">
@@ -9986,8 +10716,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           inner = `
             <div class="flex items-center justify-between mb-3">
               <div class="min-w-0">
-                <h3 class="title-display font-bold text-[19px] leading-tight">Complete UPI Payment</h3>
+                <div class="flex items-center gap-2">
+                  <h3 class="title-display font-bold text-[19px] leading-tight">Complete UPI Payment</h3>
+                </div>
                 <p class="text-[12px] text-muted mt-0.5 truncate">To ${escapeHtml(p.receiverName)} • ${escapeHtml(p.receiverUpi)}</p>
+                <div class="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${ui.upiReturnedFromApp ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-[#3F89F6]/12 text-[#3F89F6]'}">
+                  <span class="w-1.5 h-1.5 rounded-full ${ui.upiReturnedFromApp ? 'bg-emerald-500 animate-ping' : 'bg-[#3F89F6] animate-pulse'}"></span>
+                  <span>${ui.upiReturnedFromApp ? 'Returned from UPI app • Tap Confirm' : 'Awaiting UPI app confirmation'}</span>
+                </div>
               </div>
               <button type="button" data-action="cancel-upi-launch" class="p-1.5 rounded-full hover:bg-surface dark:hover:bg-zinc-800 text-muted">${icon('close', 'w-4 h-4')}</button>
             </div>
@@ -10003,18 +10739,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 <a href="${escapeHtml('paytmmp://pay?' + qp)}" class="h-9 rounded-2xl bg-surface dark:bg-zinc-900 text-ink dark:text-white text-[12px] font-semibold flex items-center justify-center hover:opacity-85 transition">Paytm</a>
               </div>
             </div>
-            <div class="mt-3 space-y-2.5">
-              <input id="upi-utr-input" type="text" maxlength="24" placeholder="Optional UTR / Ref number" class="w-full h-10 px-3.5 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-medium text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-[#C6A76D]/45" />
-              <div class="flex items-center gap-2">
-                <div class="w-full grid grid-cols-4 gap-1.5 mb-2">
-                  <a href="${escapeHtml(p.upiUri.replace('upi://pay', 'tez://upi/pay'))}" class="py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-center text-ink dark:text-white">GPay</a>
-                  <a href="${escapeHtml(p.upiUri.replace('upi://pay', 'phonepe://pay'))}" class="py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-center text-ink dark:text-white">PhonePe</a>
-                  <a href="${escapeHtml(p.upiUri.replace('upi://pay', 'paytmmp://pay'))}" class="py-2 rounded-xl bg-surface dark:bg-zinc-900 text-[11.5px] font-bold text-center text-ink dark:text-white">Paytm</a>
-                  <a href="${escapeHtml(p.upiUri)}" class="py-2 rounded-xl bg-[#C6A76D] text-[11.5px] font-bold text-center text-white">Any UPI</a>
-                </div>
-                <button type="button" data-action="confirm-upi-launch" class="flex-1 h-11 rounded-2xl bg-[#09090C] dark:bg-white text-white dark:text-[#09090C] text-[13.5px] font-bold hover:opacity-90 transition">I've Paid • Confirm</button>
-                <button type="button" data-action="cancel-upi-launch" class="px-4 h-11 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-muted hover:text-ink transition">Cancel</button>
-              </div>
+            <div class="mt-3.5 flex items-center gap-2">
+              <button type="button" data-action="confirm-upi-launch" class="flex-1 h-11 rounded-2xl ${ui.upiReturnedFromApp ? 'bg-emerald-500 text-white shadow-[0_8px_22px_-4px_rgba(16,185,129,0.5)]' : 'bg-[#09090C] dark:bg-white text-white dark:text-[#09090C]'} text-[13.5px] font-bold hover:opacity-90 transition">I've Paid • Confirm</button>
+              <button type="button" data-action="cancel-upi-launch" class="px-4 h-11 rounded-2xl bg-surface dark:bg-zinc-900 text-[13px] font-semibold text-muted hover:text-ink dark:hover:text-white transition">Cancel</button>
             </div>
           `;
         } else if (ui.modal === 'upiQrScanner') {
@@ -10290,7 +11017,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
                 </div>
                 ${topScores.length > 0 ? `
                   <div class="p-3.5 rounded-3xl bg-surface dark:bg-zinc-900 space-y-2">
-                    <div class="text-[11.5px] font-bold uppercase tracking-wider text-muted">Top Leaderboard</div>
+                    <div class="text-[11.5px] font-bold uppercase tracking-wider text-muted">${chat && chat.isPeer ? `${escapeHtml(chat.name)} &amp; You` : (chat && chat.isGroup ? escapeHtml(chat.name) : 'Your')} Leaderboard</div>
                     ${topScores.slice(0, 5).map((s, i) => `
                       <div class="flex items-center justify-between text-[12.5px]">
                         <span class="truncate font-semibold">${i + 1}. ${escapeHtml(s.player_name || 'Player')} <span class="text-muted font-normal">(${escapeHtml(s.game)})</span></span>
@@ -11250,9 +11977,507 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
       }
 
       let _lastCallRenderKey = '';
+      let _wtState = null; // { roomId, kind, videoId, url, expanded }
+      let _wtYtPlayer = null;
+      let _wtYtReady = false;
+      let _wtSuppressUntil = 0;
+      let _wtPollTimer = null;
+      let _wtLastTime = 0;
+
+      function parseWatchTogetherUrl(rawText) {
+        const str = String(rawText || '');
+        const m = str.match(/https?:\/\/[^\s<]+/i);
+        if (!m) return null;
+        const url = m[0];
+        const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/i);
+        if (yt && yt[1]) return { kind: 'youtube', videoId: yt[1], url };
+        if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return { kind: 'video', videoId: '', url };
+        return null;
+      }
+
+      function ensureYouTubeIframeApi() {
+        if (window.YT && window.YT.Player) return Promise.resolve();
+        if (window._shavloYtApiPromise) return window._shavloYtApiPromise;
+        window._shavloYtApiPromise = new Promise((resolve) => {
+          const prevCb = window.onYouTubeIframeAPIReady;
+          window.onYouTubeIframeAPIReady = () => {
+            if (typeof prevCb === 'function') try { prevCb(); } catch (_) {}
+            resolve();
+          };
+          const s = document.createElement('script');
+          s.src = 'https://www.youtube.com/iframe_api';
+          s.async = true;
+          document.head.appendChild(s);
+        });
+        return window._shavloYtApiPromise;
+      }
+
+      function getWatchTogetherTime() {
+        if (_wtState && _wtState.kind === 'youtube' && _wtYtPlayer && _wtYtReady && typeof _wtYtPlayer.getCurrentTime === 'function') {
+          return Number(_wtYtPlayer.getCurrentTime() || 0);
+        }
+        const v = document.getElementById('watch-html5-video');
+        return v ? Number(v.currentTime || 0) : 0;
+      }
+
+      function sendWatchTogetherEvent(kindEvt, extra = {}) {
+        if (!_wtState || !_wtState.roomId) return;
+        sendRoomBroadcast(_wtState.roomId, 'watch_together_fast', Object.assign({
+          evt: kindEvt,
+          roomId: _wtState.roomId,
+          fromId: activeVaultId,
+          fromName: (state && state.userProfile && state.userProfile.name) || 'Friend'
+        }, extra));
+      }
+
+      function closeWatchTogether(notifyPeer = true) {
+        clearInterval(_wtPollTimer);
+        _wtPollTimer = null;
+        if (notifyPeer && _wtState && _wtState.roomId) {
+          sendWatchTogetherEvent('close');
+        }
+        if (_wtYtPlayer && typeof _wtYtPlayer.destroy === 'function') {
+          try { _wtYtPlayer.destroy(); } catch (_) {}
+        }
+        _wtYtPlayer = null;
+        _wtYtReady = false;
+        _wtState = null;
+        const el = document.getElementById('watch-together-float');
+        if (el) el.remove();
+      }
+
+      function renderWatchTogetherFloat() {
+        let host = document.getElementById('watch-together-float');
+        const activeChat = document.getElementById('active-chat-main');
+        if (!_wtState || !activeChat || !state || state.selectedChatId !== _wtState.roomId) {
+          if (host) host.remove();
+          return;
+        }
+        const needInitPlayer = !host || host.dataset.wtKey !== (_wtState.roomId + ':' + _wtState.url);
+        if (!host) {
+          host = document.createElement('div');
+          host.id = 'watch-together-float';
+          activeChat.appendChild(host);
+        }
+        host.dataset.wtKey = _wtState.roomId + ':' + _wtState.url;
+        host.style.top = 'calc(max(0.6rem, env(safe-area-inset-top)) + 54px)';
+        host.className = `absolute right-3 sm:right-6 z-30 ${_wtState.expanded ? 'w-[310px] sm:w-[390px]' : 'w-[228px] sm:w-[270px]'} rounded-2xl overflow-hidden bg-[#09090C]/92 backdrop-blur-2xl border border-white/20 shadow-[0_20px_48px_-10px_rgba(0,0,0,0.7)] transition-all duration-200`;
+        if (!needInitPlayer) return;
+
+        host.innerHTML = `
+          <div class="px-2.5 py-1.5 flex items-center justify-between gap-2 bg-white/[0.06] border-b border-white/10 text-white">
+            <div class="inline-flex items-center gap-1.5 min-w-0">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+              <span class="text-[11px] font-bold truncate">Watch Together • Synced</span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button type="button" data-action="wt-sync-now" title="Sync playback" class="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[11px] transition">⟳</button>
+              <button type="button" data-action="wt-toggle-size" title="Resize" class="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[11px] font-bold transition">${_wtState.expanded ? '↘' : '↗'}</button>
+              <button type="button" data-action="wt-close" title="Close" class="w-6 h-6 rounded-full bg-rose-600/85 hover:bg-rose-500 flex items-center justify-center transition">${icon('close', 'w-3 h-3')}</button>
+            </div>
+          </div>
+          <div class="relative aspect-video bg-black">
+            ${_wtState.kind === 'youtube'
+              ? '<div id="watch-yt-player" class="w-full h-full"></div>'
+              : `<video id="watch-html5-video" src="${escapeHtml(_wtState.url)}" controls playsinline class="w-full h-full object-contain bg-black"></video>`}
+          </div>
+        `;
+
+        clearInterval(_wtPollTimer);
+        _wtLastTime = 0;
+
+        if (_wtState.kind === 'youtube') {
+          ensureYouTubeIframeApi().then(() => {
+            if (!_wtState || !document.getElementById('watch-yt-player')) return;
+            _wtYtReady = false;
+            _wtYtPlayer = new window.YT.Player('watch-yt-player', {
+              videoId: _wtState.videoId,
+              width: '100%',
+              height: '100%',
+              playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+              events: {
+                onReady: () => { _wtYtReady = true; },
+                onStateChange: (ev) => {
+                  if (Date.now() < _wtSuppressUntil) return;
+                  const t = getWatchTogetherTime();
+                  _wtLastTime = t;
+                  if (ev.data === window.YT.PlayerState.PLAYING) sendWatchTogetherEvent('play', { time: t });
+                  else if (ev.data === window.YT.PlayerState.PAUSED) sendWatchTogetherEvent('pause', { time: t });
+                }
+              }
+            });
+            _wtPollTimer = setInterval(() => {
+              if (!_wtState || !_wtYtPlayer || !_wtYtReady || Date.now() < _wtSuppressUntil) return;
+              const cur = getWatchTogetherTime();
+              if (Math.abs(cur - _wtLastTime) > 2.2) {
+                sendWatchTogetherEvent('seek', { time: cur });
+              }
+              _wtLastTime = cur;
+            }, 600);
+          });
+        } else {
+          const v = document.getElementById('watch-html5-video');
+          if (v) {
+            v.onplay = () => { if (Date.now() >= _wtSuppressUntil) sendWatchTogetherEvent('play', { time: v.currentTime || 0 }); };
+            v.onpause = () => { if (Date.now() >= _wtSuppressUntil) sendWatchTogetherEvent('pause', { time: v.currentTime || 0 }); };
+            v.onseeked = () => { if (Date.now() >= _wtSuppressUntil) sendWatchTogetherEvent('seek', { time: v.currentTime || 0 }); };
+          }
+        }
+      }
+
+      function startWatchTogether(rawUrl, chatId, broadcast = true) {
+        const parsed = parseWatchTogetherUrl(rawUrl);
+        const rid = chatId || (state && state.selectedChatId);
+        if (!parsed || !rid) {
+          showToast('Paste a valid YouTube or MP4/WebM video link');
+          return false;
+        }
+        closeWatchTogether(false);
+        _wtState = { roomId: rid, kind: parsed.kind, videoId: parsed.videoId, url: parsed.url, expanded: false };
+        if (broadcast) {
+          sendWatchTogetherEvent('load', { kind: parsed.kind, videoId: parsed.videoId, url: parsed.url });
+          showToast('Watch Together started');
+        }
+        renderWatchTogetherFloat();
+        return true;
+      }
+
+      function handleWatchTogetherSignal(sig) {
+        if (!sig || !sig.roomId || !activeVaultId || sig.fromId === activeVaultId) return;
+        if (sig.evt === 'close') {
+          if (_wtState && _wtState.roomId === sig.roomId) {
+            closeWatchTogether(false);
+            showToast('Watch Together ended');
+          }
+          return;
+        }
+        if (sig.evt === 'load' && sig.url) {
+          startWatchTogether(sig.url, sig.roomId, false);
+          if (state && state.selectedChatId !== sig.roomId) {
+            showToast(`${sig.fromName || 'Friend'} started Watch Together`);
+          }
+          return;
+        }
+        if (!_wtState || _wtState.roomId !== sig.roomId) return;
+        _wtSuppressUntil = Date.now() + 850;
+        const targetTime = Number(sig.time || 0);
+        if (_wtState.kind === 'youtube' && _wtYtPlayer && _wtYtReady) {
+          const cur = getWatchTogetherTime();
+          if (Math.abs(cur - targetTime) > 0.9 || sig.evt === 'seek') {
+            _wtYtPlayer.seekTo(targetTime, true);
+          }
+          if (sig.evt === 'play') _wtYtPlayer.playVideo();
+          else if (sig.evt === 'pause') _wtYtPlayer.pauseVideo();
+        } else {
+          const v = document.getElementById('watch-html5-video');
+          if (v) {
+            if (Math.abs((v.currentTime || 0) - targetTime) > 0.9 || sig.evt === 'seek') {
+              v.currentTime = targetTime;
+            }
+            if (sig.evt === 'play') v.play().catch(() => {});
+            else if (sig.evt === 'pause') v.pause();
+          }
+        }
+      }
+
+      let _peekPc = null;
+      let _peekStream = null;
+      let _peekRoomId = '';
+      let _peekIsSharer = false;
+      let _peekPeerName = '';
+      let _peekExpanded = false;
+
+      function renderScreenPeekFloat() {
+        let host = document.getElementById('screen-peek-float');
+        const activeChat = document.getElementById('active-chat-main');
+        if (!_peekStream || !_peekRoomId || !activeChat || !state || state.selectedChatId !== _peekRoomId) {
+          if (host) host.remove();
+          return;
+        }
+        if (!host) {
+          host = document.createElement('div');
+          host.id = 'screen-peek-float';
+          activeChat.appendChild(host);
+        }
+        host.style.top = 'calc(max(0.6rem, env(safe-area-inset-top)) + 54px)';
+        host.className = `absolute right-3 sm:right-6 z-30 ${_peekExpanded ? 'w-[300px] sm:w-[360px]' : 'w-[184px] sm:w-[220px]'} rounded-2xl overflow-hidden bg-[#09090C]/90 backdrop-blur-2xl border border-white/20 shadow-[0_18px_42px_-8px_rgba(0,0,0,0.65)] transition-all duration-200`;
+        host.innerHTML = `
+          <div class="relative aspect-video bg-black">
+            <video id="screen-peek-video" autoplay playsinline muted class="w-full h-full object-contain"></video>
+            <div class="absolute top-1.5 left-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md text-[10px] font-bold text-white">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span class="truncate max-w-[96px]">${_peekIsSharer ? 'Sharing Peek' : escapeHtml(_peekPeerName || 'Live Peek')}</span>
+            </div>
+            <div class="absolute top-1.5 right-1.5 flex items-center gap-1">
+              <button type="button" data-action="toggle-peek-size" title="${_peekExpanded ? 'Shrink' : 'Expand'}" class="w-6 h-6 rounded-full bg-black/65 hover:bg-black/85 text-white flex items-center justify-center text-[11px] font-bold transition">${_peekExpanded ? '↘' : '↗'}</button>
+              <button type="button" data-action="stop-screen-peek" title="End Peek" class="w-6 h-6 rounded-full bg-rose-600/85 hover:bg-rose-500 text-white flex items-center justify-center transition">${icon('close', 'w-3 h-3')}</button>
+            </div>
+          </div>
+        `;
+        const v = document.getElementById('screen-peek-video');
+        if (v && v.srcObject !== _peekStream) {
+          v.srcObject = _peekStream;
+          v.play().catch(() => {});
+        }
+      }
+
+      function stopScreenPeek(notifyPeer = true) {
+        const prevRoom = _peekRoomId;
+        if (notifyPeer && prevRoom) {
+          sendRoomBroadcast(prevRoom, 'screen_peek_sig', { kind: 'stop', roomId: prevRoom, fromId: activeVaultId });
+        }
+        if (_peekPc) {
+          try { _peekPc.close(); } catch (_) {}
+          _peekPc = null;
+        }
+        if (_peekStream) {
+          try { _peekStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+          _peekStream = null;
+        }
+        _peekRoomId = '';
+        _peekIsSharer = false;
+        _peekPeerName = '';
+        _peekExpanded = false;
+        const host = document.getElementById('screen-peek-float');
+        if (host) host.remove();
+      }
+
+      async function startScreenPeek(chatId) {
+        if (!chatId) return;
+        const chat = getMergedChats().find(c => c.id === chatId);
+        if (!chat || !chat.isPeer) {
+          showToast('Open a friend chat to start Screen Peek');
+          return;
+        }
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function' || typeof RTCPeerConnection === 'undefined') {
+          showToast('Screen Peek is not supported on this browser');
+          return;
+        }
+        stopScreenPeek(false);
+        try {
+          const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false });
+          _peekStream = stream;
+          _peekRoomId = chatId;
+          _peekIsSharer = true;
+          _peekPeerName = (state && state.userProfile && state.userProfile.name) || 'Friend';
+          const vTrack = stream.getVideoTracks()[0];
+          if (vTrack) {
+            vTrack.onended = () => { stopScreenPeek(true); showToast('Screen Peek ended'); };
+          }
+          const pc = new RTCPeerConnection({ iceServers: getIceServers(), iceCandidatePoolSize: 6, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
+          _peekPc = pc;
+          stream.getTracks().forEach(t => pc.addTrack(t, stream));
+          pc.onicecandidate = (ev) => {
+            if (ev.candidate) {
+              sendRoomBroadcast(chatId, 'screen_peek_sig', { kind: 'ice', roomId: chatId, fromId: activeVaultId, candidate: ev.candidate });
+            }
+          };
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          sendRoomBroadcast(chatId, 'screen_peek_sig', {
+            kind: 'offer',
+            roomId: chatId,
+            fromId: activeVaultId,
+            fromName: (state && state.userProfile && state.userProfile.name) || 'Friend',
+            sdp: offer
+          });
+          renderScreenPeekFloat();
+          showToast('Screen Peek live in chat');
+        } catch (err) {
+          stopScreenPeek(false);
+          if (err && err.name !== 'NotAllowedError') showToast('Could not start Screen Peek');
+        }
+      }
+
+      async function handleScreenPeekSignal(sig) {
+        if (!sig || !sig.roomId || !activeVaultId || sig.fromId === activeVaultId) return;
+        if (sig.kind === 'stop') {
+          if (_peekRoomId === sig.roomId) {
+            stopScreenPeek(false);
+            showToast('Screen Peek ended');
+          }
+          return;
+        }
+        if (sig.kind === 'offer' && sig.sdp) {
+          stopScreenPeek(false);
+          _peekRoomId = sig.roomId;
+          _peekIsSharer = false;
+          _peekPeerName = sig.fromName || 'Friend';
+          const pc = new RTCPeerConnection({ iceServers: getIceServers(), iceCandidatePoolSize: 6, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
+          _peekPc = pc;
+          pc.ontrack = (ev) => {
+            if (ev.streams && ev.streams[0]) {
+              _peekStream = ev.streams[0];
+              renderScreenPeekFloat();
+            }
+          };
+          pc.onicecandidate = (ev) => {
+            if (ev.candidate) {
+              sendRoomBroadcast(sig.roomId, 'screen_peek_sig', { kind: 'ice', roomId: sig.roomId, fromId: activeVaultId, candidate: ev.candidate });
+            }
+          };
+          await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+          const ans = await pc.createAnswer();
+          await pc.setLocalDescription(ans);
+          sendRoomBroadcast(sig.roomId, 'screen_peek_sig', { kind: 'answer', roomId: sig.roomId, fromId: activeVaultId, sdp: ans });
+          if (state && state.selectedChatId !== sig.roomId) {
+            showToast(`${_peekPeerName} started a Screen Peek`);
+          }
+          return;
+        }
+        if (sig.kind === 'answer' && sig.sdp && _peekPc && _peekRoomId === sig.roomId) {
+          await _peekPc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+          return;
+        }
+        if (sig.kind === 'ice' && sig.candidate && _peekPc && _peekRoomId === sig.roomId) {
+          try { await _peekPc.addIceCandidate(new RTCIceCandidate(sig.candidate)); } catch (_) {}
+        }
+      }
+
+      let _airGestureTimer = null;
+      let _airGestureStream = null;
+      let _airGestureVideo = null;
+      let _airGesturePrevFrame = null;
+      let _airGestureCooldownUntil = 0;
+      let _airGesturePalmScore = 0;
+      let _airGestureWaveScore = 0;
+      let _airGestureWaveDir = 0;
+
+      function stopAirGestureEngine() {
+        clearInterval(_airGestureTimer);
+        _airGestureTimer = null;
+        _airGesturePrevFrame = null;
+        _airGesturePalmScore = 0;
+        _airGestureWaveScore = 0;
+        if (_airGestureStream) {
+          try { _airGestureStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+          _airGestureStream = null;
+        }
+        _airGestureVideo = null;
+      }
+
+      async function startAirGestureEngine() {
+        if (!ui || !ui.activeCall || (state && state.security && state.security.airGestureCalls === false)) {
+          stopAirGestureEngine();
+          return;
+        }
+        if (_airGestureTimer) return;
+        const W = 48, H = 36;
+        const cvs = document.createElement('canvas');
+        cvs.width = W; cvs.height = H;
+        const ctx = cvs.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+
+        const existingVid = document.getElementById('local-vc-video');
+        if (existingVid && existingVid.srcObject) {
+          _airGestureVideo = existingVid;
+        } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          try {
+            _airGestureStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 160, height: 120 }, audio: false });
+            const hiddenV = document.createElement('video');
+            hiddenV.muted = true;
+            hiddenV.playsInline = true;
+            hiddenV.srcObject = _airGestureStream;
+            await hiddenV.play().catch(() => {});
+            _airGestureVideo = hiddenV;
+          } catch (_) {
+            return;
+          }
+        }
+        if (!_airGestureVideo) return;
+
+        const updateHud = (pct, color, text) => {
+          const ring = document.getElementById('air-gesture-ring');
+          const lbl = document.getElementById('air-gesture-label');
+          if (ring) {
+            const C = 56.55;
+            ring.style.strokeDashoffset = String(C * (1 - Math.max(0, Math.min(1, pct))));
+            if (color) ring.setAttribute('stroke', color);
+          }
+          if (lbl && text) lbl.textContent = text;
+        };
+
+        _airGestureTimer = setInterval(() => {
+          if (!ui || !ui.activeCall) { stopAirGestureEngine(); return; }
+          const vid = (document.getElementById('local-vc-video') && document.getElementById('local-vc-video').srcObject) ? document.getElementById('local-vc-video') : _airGestureVideo;
+          if (!vid || vid.readyState < 2) return;
+          if (Date.now() < _airGestureCooldownUntil) return;
+
+          try { ctx.drawImage(vid, 0, 0, W, H); } catch (_) { return; }
+          const data = ctx.getImageData(0, 0, W, H).data;
+          const gray = new Uint8Array(W * H);
+          for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+            gray[j] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+          }
+          if (!_airGesturePrevFrame) { _airGesturePrevFrame = gray; return; }
+
+          let leftMotion = 0, centerMotion = 0, rightMotion = 0;
+          for (let y = 4; y < H - 4; y++) {
+            for (let x = 2; x < W - 2; x++) {
+              const idx = y * W + x;
+              const diff = Math.abs(gray[idx] - _airGesturePrevFrame[idx]);
+              if (diff > 22) {
+                if (x < 16) leftMotion++;
+                else if (x < 32) centerMotion++;
+                else rightMotion++;
+              }
+            }
+          }
+          _airGesturePrevFrame = gray;
+
+          const total = leftMotion + centerMotion + rightMotion;
+          const curCall = ui.activeCall;
+          const defLabel = curCall.status === 'incoming' ? 'Palm: Answer • Wave: Decline' : 'Palm: Mute • Wave: End';
+
+          const latDiff = leftMotion - rightMotion;
+          if (Math.abs(latDiff) > 28 && total > 65) {
+            const dir = latDiff > 0 ? 1 : -1;
+            if (_airGestureWaveDir !== 0 && dir !== _airGestureWaveDir) {
+              _airGestureWaveScore = Math.min(1, _airGestureWaveScore + 0.36);
+            } else {
+              _airGestureWaveScore = Math.min(1, _airGestureWaveScore + 0.16);
+            }
+            _airGestureWaveDir = dir;
+            _airGesturePalmScore = Math.max(0, _airGesturePalmScore - 0.15);
+            updateHud(_airGestureWaveScore, '#FF3B30', curCall.status === 'incoming' ? 'Waving to Decline...' : 'Waving to End Call...');
+            if (_airGestureWaveScore >= 1) {
+              _airGestureCooldownUntil = Date.now() + 2500;
+              _airGestureWaveScore = 0;
+              triggerHaptic(18);
+              const endBtn = document.querySelector('[data-action="end-call"]');
+              if (endBtn) endBtn.click();
+              return;
+            }
+          } else if (centerMotion > 28 && total < 220 && Math.abs(latDiff) < 30) {
+            _airGesturePalmScore = Math.min(1, _airGesturePalmScore + 0.16);
+            _airGestureWaveScore = Math.max(0, _airGestureWaveScore - 0.15);
+            updateHud(_airGesturePalmScore, '#3F89F6', curCall.status === 'incoming' ? 'Hold Palm to Answer...' : (curCall.muted ? 'Hold Palm to Unmute...' : 'Hold Palm to Mute...'));
+            if (_airGesturePalmScore >= 1) {
+              _airGestureCooldownUntil = Date.now() + 2200;
+              _airGesturePalmScore = 0;
+              triggerHaptic(14);
+              if (curCall.status === 'incoming') {
+                const accBtn = document.querySelector('[data-action="accept-call"]');
+                if (accBtn) accBtn.click();
+              } else {
+                const muteBtn = document.querySelector('[data-action="call-toggle-mute"]');
+                if (muteBtn) muteBtn.click();
+              }
+              return;
+            }
+          } else {
+            _airGesturePalmScore = Math.max(0, _airGesturePalmScore - 0.1);
+            _airGestureWaveScore = Math.max(0, _airGestureWaveScore - 0.1);
+            if (_airGesturePalmScore <= 0.05 && _airGestureWaveScore <= 0.05) {
+              updateHud(0, '#3F89F6', defLabel);
+            }
+          }
+        }, 110);
+      }
+
       function renderCallOverlay() {
         const root = document.getElementById('call-root');
-        if (!ui.activeCall || !state) { _lastCallRenderKey = ''; root.innerHTML = ''; return; }
+        if (!ui.activeCall || !state) { stopAirGestureEngine(); _lastCallRenderKey = ''; root.innerHTML = ''; return; }
         const call = ui.activeCall;
         const callKey = [
           call.roomId, call.status, call.type,
@@ -11314,6 +12539,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           const lcamOff = document.getElementById('local-vc-off-badge');
           if (lcamOff) lcamOff.classList.toggle('hidden', !!call.camOn);
           attachCallStreams();
+          startAirGestureEngine();
           return;
         }
         _lastCallRenderKey = callKey;
@@ -11385,6 +12611,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               <!-- Right-Edge Minimal Controls: ••• (Cam, Mic, Flip, Speaker) + Red X -->
               <div style="padding-bottom:max(1.75rem, env(safe-area-inset-bottom));" class="relative z-20 px-5 flex items-end justify-end">
                 <div class="relative flex flex-col items-end gap-3.5">
+                  <div id="air-gesture-hud" class="${(state && state.security && state.security.airGestureCalls !== false) ? 'inline-flex' : 'hidden'} items-center gap-2 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-xl border border-white/15 text-[11px] font-semibold text-white/90 shadow-lg">
+                    <svg class="w-4 h-4 -rotate-90 shrink-0" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2.5"/><circle id="air-gesture-ring" cx="12" cy="12" r="9" fill="none" stroke="#3F89F6" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55"/></svg>
+                    <span id="air-gesture-label">${call.status === 'incoming' ? 'Palm: Answer • Wave: Decline' : 'Palm: Mute • Wave: End'}</span>
+                  </div>
                   <div id="call-peer-state-badge" class="hidden px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11.5px] font-semibold text-white/90"></div>
                   <div id="call-controls-menu" class="flex flex-col items-center gap-3 mb-1 ${call.muteMenuOpen ? '' : 'hidden'}">
                     <button id="call-cam-btn" type="button" data-action="call-toggle-cam" title="${call.camOn ? 'Camera Off' : 'Camera On'}" aria-label="Toggle Camera" class="w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-90 transition ${call.camOn ? 'bg-white text-[#34C759]' : 'bg-black/45 backdrop-blur-xl border border-white/25 text-white'}">
@@ -11428,7 +12658,11 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
             <div class="relative z-10 flex flex-col items-center justify-center gap-3">
               ${renderAvatar(call.avatarText, call.avatarUrl, 'w-28 h-28 text-[36px]', 'bg-white/10 backdrop-blur-2xl border border-[#C6A76D]/40 text-white shadow-2xl')}
-              <div id="call-peer-state-badge" class="hidden px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11.5px] font-semibold text-white/90"></div>
+              <div id="air-gesture-hud" class="${(state && state.security && state.security.airGestureCalls !== false) ? 'inline-flex' : 'hidden'} items-center gap-2 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-xl border border-white/15 text-[11px] font-semibold text-white/90 shadow-lg">
+                    <svg class="w-4 h-4 -rotate-90 shrink-0" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2.5"/><circle id="air-gesture-ring" cx="12" cy="12" r="9" fill="none" stroke="#3F89F6" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55"/></svg>
+                    <span id="air-gesture-label">${call.status === 'incoming' ? 'Palm: Answer • Wave: Decline' : 'Palm: Mute • Wave: End'}</span>
+                  </div>
+                  <div id="call-peer-state-badge" class="hidden px-3 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11.5px] font-semibold text-white/90"></div>
             </div>
 
             ${call.status === 'incoming' ? `
@@ -11459,6 +12693,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           </div>
         `;
         attachCallStreams();
+        startAirGestureEngine();
       }
 
       function render() {
@@ -11521,6 +12756,9 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         renderCallOverlay();
         renderLockOverlay();
         renderStatusViewer();
+        if (_peekStream && _peekRoomId) renderScreenPeekFloat();
+        if (_wtState && _wtState.roomId) renderWatchTogetherFloat();
+        mountSketchCanvasOverlay();
       }
 
       let statusCubeBusy = false;
@@ -12022,7 +13260,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           if (window._dualTapChat && window._dualTapChat.timer) clearTimeout(window._dualTapChat.timer);
           const openChatNow = () => {
             window._dualTapChat = null;
-            if (ui.walkieActive) stopWalkieTalkie();
+            if (ui.sketchActive) stopLiveSketch();
             ui.mistPickerOpen = false; ui.mistNext = false; ui.mist24h = false;
             if (state.security && state.security.secretChatIds && state.security.secretChatIds[cid]) {
               ui.pendingUnlockChatId = cid;
@@ -12072,7 +13310,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             showToast('Exited Private Mode • Messages cleared');
           }
         } else if (action === 'mobile-back') {
-          if (ui.walkieActive) stopWalkieTalkie();
+          if (ui.sketchActive) stopLiveSketch();
           ui.mistPickerOpen = false; ui.mistNext = false; ui.mist24h = false;
           state.mobileView = 'list';
           ui._navTransition = 'right';
@@ -12147,6 +13385,46 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           persistCurrentVault();
           render();
           showToast(state.security.readReceipts ? 'Blue tick read receipts On' : 'Read receipts Off');
+        } else if (action === 'start-watch-together') {
+          startWatchTogether(btn.dataset.url || '', state && state.selectedChatId, true);
+        } else if (action === 'wt-sync-now') {
+          sendWatchTogetherEvent('seek', { time: getWatchTogetherTime() });
+          showToast('Synced playback');
+        } else if (action === 'wt-toggle-size') {
+          if (_wtState) { _wtState.expanded = !_wtState.expanded; renderWatchTogetherFloat(); }
+        } else if (action === 'wt-close') {
+          closeWatchTogether(true);
+          showToast('Watch Together ended');
+        } else if (action === 'start-screen-peek') {
+          ui.attachMenuOpen = false;
+          render();
+          startScreenPeek(state && state.selectedChatId);
+        } else if (action === 'toggle-peek-size') {
+          _peekExpanded = !_peekExpanded;
+          renderScreenPeekFloat();
+        } else if (action === 'stop-screen-peek') {
+          stopScreenPeek(true);
+          showToast('Screen Peek ended');
+        } else if (action === 'toggle-live-sketch') {
+          ensureSecurityDefaults();
+          state.security.liveSketchEnabled = (state.security.liveSketchEnabled === false);
+          if (!state.security.liveSketchEnabled) {
+            ui.sketchActive = false;
+            ui.sketchChatId = null;
+            _sketchStrokes = [];
+            mountSketchCanvasOverlay();
+          }
+          persistCurrentVault();
+          scheduleUserPrefsSync(true);
+          render();
+          showToast(state.security.liveSketchEnabled ? 'Live Sketch enabled' : 'Live Sketch turned off');
+        } else if (action === 'toggle-air-gestures') {
+          ensureSecurityDefaults();
+          state.security.airGestureCalls = (state.security.airGestureCalls === false);
+          persistCurrentVault();
+          scheduleUserPrefsSync(true);
+          render();
+          showToast(state.security.airGestureCalls ? 'Air-Gesture Call Controls enabled' : 'Air-Gesture Call Controls turned off');
         } else if (action === 'toggle-hide-world-chat') {
           ensureSecurityDefaults();
           state.security.hideWorldChat = !state.security.hideWorldChat;
@@ -12305,9 +13583,14 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           ui.attachMenuOpen = false;
           ui.modal = btn.dataset.modal;
           if (ui.modal === 'gamesHub' && getSupaCfg()) {
-            supaFetch('shavlo_game_scores', 'GET', '?select=player_name,game,score&order=score.desc&limit=5').then(rows => {
-              if (Array.isArray(rows)) { ui.topGameScores = rows; if (ui.modal === 'gamesHub') renderModal(); }
-            }).catch(() => {});
+            const pIds = getGameChatPlayerIds();
+            ui.topGameScores = [];
+            if (pIds.length > 0) {
+              const inList = pIds.map(id => `"${String(id).replace(/"/g, '')}"`).join(',');
+              supaFetch('shavlo_game_scores', 'GET', `?select=vault_id,player_name,game,score&vault_id=in.(${encodeURIComponent(inList)})&order=score.desc&limit=5`).then(rows => {
+                if (Array.isArray(rows)) { ui.topGameScores = rows; if (ui.modal === 'gamesHub') renderModal(); }
+              }).catch(() => {});
+            }
           } else if (ui.modal === 'groupLedger' && getSupaCfg()) {
             const gc = getSelectedChat();
             if (gc) {
@@ -12596,8 +13879,22 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           renderModal();
           const inp = document.getElementById('message-input');
           if (inp) { inp.value += btn.dataset.emoji; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); }
-        } else if (action === 'stop-walkie') {
-          stopWalkieTalkie();
+        } else if (action === 'sketch-tool') {
+          ui.sketchTool = btn.dataset.tool || 'pen';
+          render();
+        } else if (action === 'sketch-color') {
+          ui.sketchColor = btn.dataset.color || 'adaptive';
+          ui.sketchTool = 'pen';
+          render();
+        } else if (action === 'sketch-size') {
+          ui.sketchSize = Number(btn.dataset.size || 5);
+          render();
+        } else if (action === 'sketch-undo') {
+          undoLiveSketch();
+        } else if (action === 'sketch-clear') {
+          clearLiveSketch();
+        } else if (action === 'stop-sketch') {
+          stopLiveSketch();
         } else if (action === 'start-voice') {
           if (suppressMicClick) { suppressMicClick = false; return; }
           clearInterval(recordTimer);
@@ -12609,7 +13906,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           recordTimer = setInterval(() => {
             if (!ui.recordingPaused) {
               ui.recordSeconds += 1;
-              render();
+              const lbl = document.getElementById('rec-timer-label');
+              if (lbl) {
+                lbl.textContent = `${Math.floor(ui.recordSeconds / 60)}:${String(ui.recordSeconds % 60).padStart(2, '0')}`;
+              }
             }
           }, 1000);
         } else if (action === 'toggle-pause-voice') {
@@ -12838,8 +14138,26 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           }
         } else if (action === 'close-view-once') {
           burnActiveViewOnce();
+        } else if (action === 'cycle-voice-speed') {
+          const speeds = [1, 1.5, 2];
+          const curIdx = speeds.indexOf(Number(ui.voiceSpeed || 1));
+          ui.voiceSpeed = speeds[(curIdx + 1) % speeds.length];
+          if (activeVoicePlayer) {
+            try { activeVoicePlayer.playbackRate = ui.voiceSpeed; } catch (_) {}
+          }
+          if (ui.playingVoiceId) {
+            document.querySelectorAll('[data-action="cycle-voice-speed"]').forEach(el => { el.textContent = ui.voiceSpeed + '×'; });
+          } else {
+            render();
+          }
+          showToast(`Voice speed ${ui.voiceSpeed}×`);
+        } else if (action === 'toggle-voice-trim') {
+          ui.voiceTrimSilence = (ui.voiceTrimSilence === false);
+          if (!ui.playingVoiceId) render();
+          showToast(ui.voiceTrimSilence ? 'Silence trim enabled (skips 2s pauses)' : 'Silence trim off');
         } else if (action === 'play-voice') {
           clearTimeout(voicePlayTimer);
+          if (window._voiceSilenceTimer) { clearInterval(window._voiceSilenceTimer); window._voiceSilenceTimer = null; }
           if (activeVoicePlayer) { try { activeVoicePlayer.pause(); } catch (_) {} activeVoicePlayer = null; }
           const id = btn.dataset.id;
           const chat = getSelectedChat();
@@ -12851,14 +14169,78 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             ui.playingVoiceId = id;
             if (targetMsg && targetMsg.audioUrl) {
               try {
-                activeVoicePlayer = new Audio(targetMsg.audioUrl);
-                activeVoicePlayer.onended = () => {
+                const audioEl = new Audio(targetMsg.audioUrl);
+                audioEl.crossOrigin = 'anonymous';
+                audioEl.playbackRate = Number(ui.voiceSpeed || 1);
+                activeVoicePlayer = audioEl;
+
+                let analyser = null, freqBuf = null, silentMs = 0, trimming = false;
+                try {
+                  const AC = window.AudioContext || window.webkitAudioContext;
+                  if (AC) {
+                    const ac = new AC();
+                    const srcNode = ac.createMediaElementSource(audioEl);
+                    analyser = ac.createAnalyser();
+                    analyser.fftSize = 256;
+                    srcNode.connect(analyser);
+                    analyser.connect(ac.destination);
+                    freqBuf = new Uint8Array(analyser.frequencyBinCount);
+                  }
+                } catch (_) {}
+
+                window._voiceSilenceTimer = setInterval(() => {
+                  if (!activeVoicePlayer || activeVoicePlayer !== audioEl || audioEl.paused) return;
+                  const dur = Number(audioEl.duration || 0);
+                  const cur = Number(audioEl.currentTime || 0);
+                  if (dur > 0 && isFinite(dur)) {
+                    const pct = Math.max(0, Math.min(1, cur / dur));
+                    const waveWrap = document.querySelector(`[data-voice-wave="${id}"]`);
+                    if (waveWrap) {
+                      const bars = waveWrap.querySelectorAll('[data-wbar]');
+                      const activeCount = Math.round(pct * bars.length);
+                      bars.forEach((b, idx) => {
+                        b.style.opacity = idx < activeCount ? '1' : '0.4';
+                      });
+                    }
+                    const tEl = document.querySelector(`[data-voice-time="${id}"]`);
+                    if (tEl) {
+                      const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+                      tEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+                    }
+                  }
+                  if (analyser && freqBuf && ui.voiceTrimSilence !== false) {
+                    analyser.getByteTimeDomainData(freqBuf);
+                    let sumSq = 0;
+                    for (let i = 0; i < freqBuf.length; i++) {
+                      const v = (freqBuf[i] - 128) / 128;
+                      sumSq += v * v;
+                    }
+                    const rms = Math.sqrt(sumSq / freqBuf.length);
+                    if (rms < 0.014) {
+                      silentMs += 75;
+                      if (silentMs >= 1600 && !trimming) {
+                        trimming = true;
+                        audioEl.playbackRate = 3.5;
+                      }
+                    } else {
+                      silentMs = 0;
+                      if (trimming) {
+                        trimming = false;
+                        audioEl.playbackRate = Number(ui.voiceSpeed || 1);
+                      }
+                    }
+                  }
+                }, 75);
+
+                audioEl.onended = () => {
+                  clearInterval(window._voiceSilenceTimer);
+                  window._voiceSilenceTimer = null;
                   ui.playingVoiceId = null;
                   activeVoicePlayer = null;
                   if (targetMsg.viewOnce) { deleteMessageEverywhere(chat, targetMsg.id); showToast('Once View voice deleted'); }
                   render();
                 };
-                activeVoicePlayer.play().catch(() => {});
+                audioEl.play().catch(() => {});
               } catch (_) {}
             } else {
               voicePlayTimer = setTimeout(() => {
@@ -13445,12 +14827,53 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           });
           if (peerId && activeVaultId) {
             supaWriteReliable('shavlo_friendships', 'DELETE', `?or=(and(user_a.eq.${encodeURIComponent(activeVaultId)},user_b.eq.${encodeURIComponent(peerId)}),and(user_a.eq.${encodeURIComponent(peerId)},user_b.eq.${encodeURIComponent(activeVaultId)}))`, null);
+            const noticeId = 'unfr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+            const removedAt = Date.now();
+            const noticePayload = {
+              type: 'unfriend_notice',
+              id: noticeId,
+              fromId: activeVaultId,
+              fromName: (state.userProfile && state.userProfile.name) || 'Friend',
+              toId: peerId,
+              roomId: cid || makeRoomId(activeVaultId, peerId),
+              time: nowTime(),
+              removedAt
+            };
+            if (supaRealtimeChan) {
+              try {
+                supaRealtimeChan.send({
+                  type: 'broadcast',
+                  event: 'friend_remove_fast',
+                  payload: noticePayload
+                });
+              } catch (_) {}
+            }
+            supaWriteReliable('shavlo_messages', 'POST', '?on_conflict=id', {
+              id: noticeId,
+              room_id: 'sys_unfriend_' + peerId,
+              author_id: activeVaultId,
+              author_name: (state.userProfile && state.userProfile.name) || 'Friend',
+              payload: noticePayload,
+              created_at: removedAt,
+              expires_at: removedAt + (7 * 86400000)
+            });
           }
           if (state.selectedChatId === cid) { state.selectedChatId = null; state.mobileView = 'list'; }
           ui.modal = null; ui.contextMenuChatId = null;
           persistCurrentVault();
           render();
           showToast(`Removed ${uname} from friends`);
+        } else if (action === 'dismiss-unfriend-notice') {
+          const nid = btn.dataset.id || '';
+          ensureSecurityDefaults();
+          if (nid) {
+            state.security.dismissedUnfriendIds = state.security.dismissedUnfriendIds || {};
+            state.security.dismissedUnfriendIds[nid] = Date.now();
+            state.unfriendNotices = (state.unfriendNotices || []).filter(n => n.id !== nid);
+            supaWriteReliable('shavlo_messages', 'DELETE', `?id=eq.${encodeURIComponent(nid)}`, null);
+            persistCurrentVault();
+            render();
+          }
         } else if (action === 'toggle-block') {
           toggleBlockChat(btn.dataset.id, btn.dataset.name);
           if (ui.modal === 'chatContext' || ui.modal === 'contactMenu') { ui.modal = null; ui.contextMenuChatId = null; }
@@ -13500,33 +14923,41 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'swipe-ping') {
           ui.swipedChatId = null;
           sendTactilePing(btn.dataset.id);
+        } else if (action === 'toggle-msg-more') {
+          ui.activeMsgMoreOpen = !ui.activeMsgMoreOpen;
+          patchMsgMenuInPlace(ui.activeMsgMenuId, null);
         } else if (action === 'msg-ctx-react') {
           const chat = getSelectedChat();
           const em = btn.dataset.emoji;
           if (chat && chat.isPeer) {
             const net = getNetwork();
             const msg = (net.peerChats[chat.id] || []).find(m => m.id === btn.dataset.id);
-            if (msg) {
-              msg.reactions = msg.reactions || [];
-              const i = msg.reactions.indexOf(em);
-              if (i >= 0) msg.reactions.splice(i, 1); else msg.reactions.push(em);
+            if (msg && !msg.deleted) {
+              const added = applyUserReaction(msg, em);
               saveNetwork(net, 'peer_update');
+              broadcastMsgUpdate(chat.id, msg);
+              if (added) {
+                launchHoloReaction(em, msg.id, true);
+                broadcastHoloReaction(chat.id, msg.id, em);
+              }
               supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(msg.id)}`, { payload: msg });
             }
           } else if (chat) {
             const msg = chat.messages.find(m => m.id === btn.dataset.id);
-            if (msg) {
-              msg.reactions = msg.reactions || [];
-              const i = msg.reactions.indexOf(em);
-              if (i >= 0) msg.reactions.splice(i, 1); else msg.reactions.push(em);
+            if (msg && !msg.deleted) {
+              const added = applyUserReaction(msg, em);
+              if (added) launchHoloReaction(em, msg.id, true);
               persistCurrentVault();
             }
           }
+          const prevId = ui.activeMsgMenuId || btn.dataset.id;
+          ui.activeMsgMenuId = null;
+          ui.activeMsgMoreOpen = false;
           ui.contextMenuMsgId = null;
           ui.modal = null;
-          render();
-          renderModal();
+          patchMsgMenuInPlace(prevId, btn.dataset.id);
         } else if (action === 'msg-ctx-reply') {
+          ui.activeMsgMenuId = null;
           ui.contextMenuMsgId = null;
           ui.modal = null;
           renderModal();
@@ -13534,54 +14965,83 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
         } else if (action === 'msg-ctx-copy') {
           const chat = getSelectedChat();
           const msg = chat && chat.messages.find(m => m.id === btn.dataset.id);
+          const prevId = ui.activeMsgMenuId || btn.dataset.id;
+          ui.activeMsgMenuId = null;
+          ui.activeMsgMoreOpen = false;
           ui.contextMenuMsgId = null;
           ui.modal = null;
-          renderModal();
-          if (msg && msg.text) copyText(msg.text, 'Message copied');
+          patchMsgMenuInPlace(prevId, null);
+          if (msg && msg.text && !msg.deleted) copyText(msg.text, 'Message copied');
         } else if (action === 'msg-ctx-forward') {
           const chat = getSelectedChat();
           const m = chat && chat.messages.find(x => x.id === btn.dataset.id);
+          ui.activeMsgMenuId = null;
           ui.contextMenuMsgId = null;
-          if (m && m.text) { ui.forwardMsg = { text: m.text }; ui.modal = 'forward'; renderModal(); }
+          if (m && m.text && !m.deleted) { ui.forwardMsg = { text: m.text }; ui.modal = 'forward'; renderModal(); }
           else { ui.modal = null; renderModal(); }
         } else if (action === 'msg-ctx-edit') {
+          ui.activeMsgMenuId = null;
           ui.contextMenuMsgId = null;
           ui.editingMsgId = btn.dataset.id;
           ui.modal = 'editMsg';
-          renderModal();
+          render();
         } else if (action === 'msg-ctx-delete') {
           const chat = getSelectedChat();
+          const delTs = Date.now();
           if (chat && chat.isPeer) {
             const net = getNetwork();
-            net.peerChats[chat.id] = (net.peerChats[chat.id] || []).filter(m => m.id !== btn.dataset.id);
-            saveNetwork(net, 'peer_update');
-            supaWriteReliable('shavlo_messages', 'DELETE', `?id=eq.${encodeURIComponent(btn.dataset.id)}`, null);
+            const msg = (net.peerChats[chat.id] || []).find(m => m.id === btn.dataset.id);
+            if (msg) {
+              msg.deleted = true;
+              msg.deletedAt = delTs;
+              msg.text = '';
+              msg.reactions = [];
+              saveNetwork(net, 'peer_update');
+              broadcastMsgUpdate(chat.id, msg);
+              supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(msg.id)}`, { payload: msg, deleted_at: delTs });
+            }
           } else if (chat) {
-            chat.messages = chat.messages.filter(m => m.id !== btn.dataset.id);
-            persistCurrentVault();
+            const msg = chat.messages.find(m => m.id === btn.dataset.id);
+            if (msg) {
+              msg.deleted = true;
+              msg.deletedAt = delTs;
+              msg.text = '';
+              msg.reactions = [];
+              persistCurrentVault();
+            }
           }
+          const prevId = ui.activeMsgMenuId || btn.dataset.id;
+          ui.activeMsgMenuId = null;
+          ui.activeMsgMoreOpen = false;
           ui.contextMenuMsgId = null;
           ui.modal = null;
-          render();
-          renderModal();
-          showToast('Message deleted');
+          patchMsgMenuInPlace(prevId, btn.dataset.id);
+          showToast('Chat deleted');
         } else if (action === 'react-msg') {
           const chat = getSelectedChat();
           const em = btn.dataset.emoji;
           if (chat && chat.isPeer) {
             const net = getNetwork();
             const msg = (net.peerChats[chat.id] || []).find(m => m.id === btn.dataset.id);
-            if (msg) {
-              msg.reactions = msg.reactions || [];
-              const i = msg.reactions.indexOf(em);
-              if (i >= 0) msg.reactions.splice(i, 1); else msg.reactions.push(em);
+            if (msg && !msg.deleted) {
+              const added = applyUserReaction(msg, em);
               saveNetwork(net, 'peer_update');
+              broadcastMsgUpdate(chat.id, msg);
+              if (added) {
+                launchHoloReaction(em, msg.id, true);
+                broadcastHoloReaction(chat.id, msg.id, em);
+              }
               supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(msg.id)}`, { payload: msg });
-              render();
+              patchMsgMenuInPlace(msg.id, null);
             }
           } else if (chat) {
             const msg = chat.messages.find(m => m.id === btn.dataset.id);
-            if (msg) { msg.reactions = msg.reactions || []; const i = msg.reactions.indexOf(em); if (i >= 0) msg.reactions.splice(i, 1); else msg.reactions.push(em); persistCurrentVault(); render(); }
+            if (msg && !msg.deleted) {
+              const added = applyUserReaction(msg, em);
+              if (added) launchHoloReaction(em, msg.id, true);
+              persistCurrentVault();
+              patchMsgMenuInPlace(msg.id, null);
+            }
           }
         } else if (action === 'copy-msg') {
           const chat = getSelectedChat();
@@ -13994,9 +15454,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               const net = getNetwork();
               const m = (net.peerChats[chat.id] || []).find(x => x.id === ui.editingMsgId);
               if (m) {
-                m.text = newText; m.edited = true;
+                m.text = newText; m.edited = true; m.editedAt = Date.now();
                 saveNetwork(net, 'peer_update');
-                supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(m.id)}`, { payload: m });
+                broadcastMsgUpdate(chat.id, m);
+                supaWriteReliable('shavlo_messages', 'PATCH', `?id=eq.${encodeURIComponent(m.id)}`, { payload: m, edited_at: m.editedAt });
               }
             } else {
               const m = chat.messages.find(x => x.id === ui.editingMsgId);
@@ -14461,14 +15922,44 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
       function openMsgContextSheet(msgId) {
         if (!state || !msgId) return;
+        const chat = getSelectedChat();
+        const target = chat && (chat.messages || []).find(m => m.id === msgId);
+        if (target && target.deleted) return;
         swipingMsgEl = null;
         swipingMsgId = null;
         swipingMsgDx = 0;
-        ui.contextMenuMsgId = msgId;
-        ui.modal = 'msgContext';
+        const prevId = ui.activeMsgMenuId;
+        ui.contextMenuMsgId = null;
+        ui.activeMsgMenuId = (prevId === msgId) ? null : msgId;
+        ui.activeMsgMoreOpen = false;
+        if (ui.activeMsgMenuId) _msgMenuOpenedAt = Date.now();
         playSubtleTone('tap');
-        renderModal();
+        triggerHaptic(8);
+        patchMsgMenuInPlace(prevId, ui.activeMsgMenuId);
+        if (ui.activeMsgMenuId) {
+          const bEl = document.querySelector(`[data-msg-bubble="${ui.activeMsgMenuId}"]`);
+          const feedEl = document.getElementById('message-feed');
+          if (bEl && feedEl) {
+            const r = bEl.getBoundingClientRect();
+            const needBottom = window.innerHeight - 310;
+            if (r.bottom > needBottom) {
+              feedEl.scrollBy({ top: r.bottom - needBottom, behavior: 'smooth' });
+            } else if (r.top < 120) {
+              feedEl.scrollBy({ top: r.top - 125, behavior: 'smooth' });
+            }
+          }
+        }
       }
+
+      let _msgMenuOpenedAt = 0;
+      document.addEventListener('click', (e) => {
+        if (ui && ui.activeMsgMenuId && (Date.now() - _msgMenuOpenedAt) > 350 && !e.target.closest('[data-msg-menu-wrap]')) {
+          const prevId = ui.activeMsgMenuId;
+          ui.activeMsgMenuId = null;
+          ui.activeMsgMoreOpen = false;
+          patchMsgMenuInPlace(prevId, null);
+        }
+      });
 
       document.addEventListener('contextmenu', (e) => {
         const bubble = e.target && e.target.closest && e.target.closest('[data-msg-bubble]');
@@ -14647,7 +16138,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           edgeBackActive = false;
           edgeBackDx = 0;
           if (didBack && state && state.activeNav === 'messages' && state.mobileView === 'chat') {
-            if (ui.walkieActive) stopWalkieTalkie();
+            if (ui.sketchActive) stopLiveSketch();
             ui.mistPickerOpen = false; ui.mistNext = false; ui.mist24h = false;
             triggerHaptic(10);
             state.mobileView = 'list';
@@ -14813,7 +16304,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
       document.addEventListener('pointerdown', (e) => {
         const mic = e.target && e.target.closest && e.target.closest('#chat-mic-btn');
-        if (mic && !privHoldActive && !ui.modal && !ui.recordingVoice && !ui.pendingVoiceDraft && !ui.walkieActive) {
+        if (mic && !privHoldActive && !ui.modal && !ui.recordingVoice && !ui.pendingVoiceDraft && !ui.sketchActive) {
           micUpActive = true;
           micUpStartY = e.clientX;
           micUpDy = 0;
@@ -14821,19 +16312,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
           mic.style.transition = 'none';
           return;
         }
-        const ptt = e.target && e.target.closest && e.target.closest('#walkie-ptt-btn');
-        if (ptt && ui.walkieActive) {
-          walkiePttActive = true;
-          clearTimeout(walkieDemoTimer);
-          ui.walkieSpeaking = true;
-          ui.walkiePeerSpeaking = false;
-          broadcastWalkieState(ui.walkieChatId || (getSelectedChat() && getSelectedChat().id), true, true);
-          startWalkieCapture();
-          triggerHaptic(10);
-          playSubtleTone('walkie_on');
-          render();
-          return;
-        }
+
       });
 
 
@@ -14880,7 +16359,7 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
               upi.style.transform = '';
             }
             const chat = getSelectedChat();
-            if (chat) startWalkieTalkie(chat.id);
+            if (chat) startLiveSketch(chat.id);
           }, 340);
         }
       });
@@ -14934,28 +16413,10 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
             suppressMicClick = true;
             setTimeout(() => { suppressMicClick = false; }, 320);
             const chat = getSelectedChat();
-            if (chat) startWalkieTalkie(chat.id);
+            if (chat) startLiveSketch(chat.id);
           }
         }
-        if (walkiePttActive) {
-          walkiePttActive = false;
-          ui.walkieSpeaking = false;
-          const activeRoom = ui.walkieChatId || (getSelectedChat() && getSelectedChat().id);
-          broadcastWalkieState(activeRoom, true, false);
-          stopAndBroadcastWalkie(activeRoom);
-          playSubtleTone('walkie_off');
-          const chat = getSelectedChat();
-          if (!isCancel && chat && !chat.isPeer) {
-            ui.walkiePeerSpeaking = true;
-            render();
-            walkieDemoTimer = setTimeout(() => {
-              ui.walkiePeerSpeaking = false;
-              if (ui.walkieActive) render();
-            }, 1300);
-          } else {
-            render();
-          }
-        }
+
       }
       document.addEventListener('pointerup', () => finishMicAndWalkiePointer(false));
       document.addEventListener('pointercancel', () => finishMicAndWalkiePointer(true));
@@ -16180,6 +17641,20 @@ ${chat.isPeer && activeMessages.length >= 25 && !roomHasNoMoreOlder[chat.id] ? `
 
       let _gameSession = null;
       let _gameTimer = null;
+
+      function getGameChatPlayerIds() {
+        const ids = new Set();
+        if (activeVaultId) ids.add(activeVaultId);
+        const chat = state ? getSelectedChat() : null;
+        if (chat) {
+          if (chat.isPeer && chat.peerVaultId) ids.add(chat.peerVaultId);
+          else if (chat.isGroup) {
+            const g = (getNetwork().groups || []).find(x => x.id === chat.id);
+            if (g && Array.isArray(g.memberIds)) g.memberIds.forEach(id => { if (id) ids.add(id); });
+          }
+        }
+        return Array.from(ids);
+      }
 
       function stopShavloGame() {
         clearInterval(_gameTimer);
