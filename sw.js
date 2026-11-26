@@ -1,5 +1,5 @@
 // shavlo Service Worker — Offline Shell Cache + Rich Web Push + Quick Reply + Background Sync
-const CACHE_NAME = 'shavlo-shell-v349';
+const CACHE_NAME = 'shavlo-shell-v391';
 const MEDIA_CACHE = 'shavlo-media-cache-v1';
 const SHELL_ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
